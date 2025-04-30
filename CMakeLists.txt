@@ -46,9 +46,8 @@ pico_set_program_version(PicoDev "0.1")
 
 # Generate PIO header
 pico_generate_pio_header(PicoDev
-    ${CMAKE_CURRENT_LIST_DIR}/src/blink.pio
-    ${CMAKE_CURRENT_LIST_DIR}/src/parallel.pio
-    )
+    ${CMAKE_CURRENT_LIST_DIR}/src/booty.pio
+)
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(PicoDev 1)
@@ -56,7 +55,8 @@ pico_enable_stdio_usb(PicoDev 0)
 
 # Add the standard library to the build
 target_link_libraries(PicoDev
-        pico_stdlib)
+        pico_stdlib
+)
 
 # Add the standard include files to the build
 target_include_directories(PicoDev PRIVATE
@@ -67,7 +67,7 @@ target_include_directories(PicoDev PRIVATE
 target_link_libraries(PicoDev 
         hardware_dma
         hardware_pio
-        )
+)
 
 pico_add_extra_outputs(PicoDev)
 

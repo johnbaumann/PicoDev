@@ -1,7 +1,6 @@
-.define GPIO_DATABASE 0
-.define GPIO_CS 8
-.define GPIO_RD 9
-.define GPIO_RESET 10
+.define GPIO_RD 12
+.define GPIO_CS 14
+.define GPIO_RESET 15
 
 
 .program parallel
