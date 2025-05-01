@@ -3,6 +3,7 @@
 #include <stdio.h>
 
 #include "booty.h"
+#include "comms.h"
 #include "hardware/dma.h"
 #include "hardware/pio.h"
 #include "hardware/uart.h"
@@ -58,6 +59,8 @@ int main() {
             case 1:  // Comms mode
             {
                 printf("Comms mode\n");
+                //cpu_fifo();
+                //
                 programState++;
             } break;
 

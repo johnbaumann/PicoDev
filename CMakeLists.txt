@@ -36,9 +36,11 @@ pico_sdk_init()
 # Add executable. Default name is the project name, version 0.1
 
 add_executable(PicoDev
-    src/PicoDev.c
     src/booty.c
+    src/comms.c
     src/payload.s
+    src/PicoDev.c
+    src/usb-descriptors.c
 )
 
 pico_set_program_name(PicoDev "PicoDev")
@@ -47,6 +49,7 @@ pico_set_program_version(PicoDev "0.1")
 # Generate PIO header
 pico_generate_pio_header(PicoDev
     ${CMAKE_CURRENT_LIST_DIR}/src/booty.pio
+    ${CMAKE_CURRENT_LIST_DIR}/src/comms.pio
 )
 
 # Modify the below lines to enable/disable output over UART/USB
@@ -61,12 +64,16 @@ target_link_libraries(PicoDev
 # Add the standard include files to the build
 target_include_directories(PicoDev PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
+        ./src
+        ${PICO_TINYUSB_PATH}/src
 )
 
 # Add any user requested libraries
 target_link_libraries(PicoDev 
         hardware_dma
         hardware_pio
+        pico_unique_id
+        tinyusb_device
 )
 
 pico_add_extra_outputs(PicoDev)

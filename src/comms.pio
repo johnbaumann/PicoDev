@@ -1,0 +1,70 @@
+.define GPIO_ADDR   11
+.define GPIO_RD     12
+.define GPIO_WR     13
+.define GPIO_CS     14
+
+.define IRQ_UPDATESTATUS    0
+
+.define IRQ_READDATA_PIO    4
+.define IRQ_READSTATUS_PIO  5
+.define IRQ_WRITEDATA_PIO   6
+
+
+; Output data to pins from TX FIFO
+.program readdata
+    wait 1 irq IRQ_READDATA_PIO
+    pull noblock
+    out pins, 8
+.wrap
+
+
+; Monitor the RD signal, push status to pins or trigger data out
+.program cpufifo
+
+.define PIO_BASE    2
+.define PIO_ADDR    (GPIO_ADDR - PIO_BASE + 1)
+
+
+start:
+    mov osr, null               ; clear OSR
+    out pindirs, 8              ; OSR to pindirs, disable output
+
+idle:
+    wait 0 GPIO GPIO_CS         ; wait for CS to assert low
+    jmp pin idle                ; jmp to idle if rd not asserted
+    in pins, PIO_ADDR           ; Read pins up to Address bit
+    in null, 31                 ; Shift out the other bits
+    mov y, isr                  ; Copy ISR to y so we can branch on address pin
+    jmp !y doData               ; Address pin is low, send data, otherwise, status
+
+doStatus:
+    pull noblock                ; Pull the status byte from the TX FIFO
+    out pins, 8                 ; Shift out the status byte
+    jmp setPinsAsOutput         ; Set the pins as output and wait for RD to finish
+
+doData:
+    irq wait IRQ_READDATA_PIO   ; Wait for the data SM to push data onto the pins
+
+setPinsAsOutput:
+    mov osr, ~null              ; set OSR to all ones
+    out pindirs, 8              ; set data pins as output
+
+readstall:
+    irq nowait IRQ_UPDATESTATUS   ; Wait for cpu to update status bit
+    WAIT 1 GPIO GPIO_RD         ; Wait for RD to finish
+.wrap
+
+
+; Monitor the WR signal, push data to the RX FIFO
+.program writedata
+
+start:
+    wait 0 GPIO GPIO_CS         ; Wait for CS to assert low
+    jmp pin start               ; jmp to start if wr not asserted
+    in pins, 8                  ; read 8 bits from data pins
+    push noblock                ; push the data onto the RX FIFO
+
+writestall:
+    irq nowait IRQ_UPDATESTATUS   ; Wait for cpu to update status bit
+    wait 1 GPIO GPIO_WR         ; Wait for WR to finish
+.wrap
