@@ -3,7 +3,7 @@
 .define GPIO_RESET 15
 
 
-.program parallel
+.program booty
 .side_set 3 opt pindirs
 mov x, ~null             ; pre-load x with all ones, so data returns 0xff if FIFO is empty
 wait 1 GPIO GPIO_RESET   ; wait for reset to go high

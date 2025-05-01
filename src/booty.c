@@ -1,72 +1,94 @@
+#include "booty.h"
+
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "PicoDev.h"
+#include "booty.pio.h"
 #include "hardware/clocks.h"
 #include "hardware/dma.h"
 #include "hardware/pio.h"
 #include "pico/stdlib.h"
 #include "pico/time.h"
 
-#include "booty.pio.h"
-
-enum Pin
-{
-    // UART0_TX = 0,
-    // UART0_RX = 1,
-    // UNUSED = 2,
-    PIN_D0 = 3,
-    PIN_D1 = 4,
-    PIN_D2 = 5,
-    PIN_D3 = 6,
-    PIN_D4 = 7,
-    PIN_D5 = 8,
-    PIN_D6 = 9,
-    PIN_D7 = 10,
-    PIN_A0 = 11,
-    PIN_RD = 12,
-    PIN_WR = 13,
-    PIN_CS = 14,
-    PIN_RST = 15,
-};
-
-PIO const c_pioParallelOut = pio0;
-
-const unsigned int c_smParallelOut = 0;
-
 extern const uint8_t c_payloadStart, c_payloadEnd;
 
-bool resetPending = false;
-uint32_t lastLowEvent = 0;
-
-int initDMA(const volatile void *read_addr, const unsigned int transfer_count);
-void initParallelProgram(const PIO pio, const uint8_t sm, const uint8_t offset);
+int BOOTY_initDMA(const volatile void *read_addr, const unsigned int transfer_count);
+void BOOTY_initPIO(const PIO pio, const uint8_t sm, const uint8_t offset);
 void resetCallback(uint gpio, uint32_t events);
 
-int initDMA(const volatile void *read_addr, const unsigned int transfer_count)
-{
-    int channel = dma_claim_unused_channel(true);
+bool BOOTY_transferComplete = false;
+
+static PIO const c_pioBooty = pio0;
+static const unsigned int c_smBooty = 0;
+static unsigned int s_offsetBooty = 0;
+
+static int BOOTY_dmaChannel = -1;
+
+static void BOOTY_deinitDMA();
+static void BOOTY_deinitPIO();
+
+void BOOTY_deinit() {
+    BOOTY_deinitDMA();
+    BOOTY_deinitPIO();
+}
+
+static void BOOTY_deinitDMA() {
+    if (BOOTY_dmaChannel >= 0) {
+        dma_channel_abort(BOOTY_dmaChannel);
+        dma_channel_unclaim(BOOTY_dmaChannel);
+        dma_channel_set_irq0_enabled(BOOTY_dmaChannel, false);  // Disable the IRQ for this channel
+        BOOTY_dmaChannel = -1;
+    }
+}
+
+static void BOOTY_deinitPIO() {
+    pio_sm_set_enabled(c_pioBooty, c_smBooty, false);
+    pio_sm_restart(c_pioBooty, c_smBooty);
+    pio_sm_clear_fifos(c_pioBooty, c_smBooty);
+    pio_remove_program(c_pioBooty, &booty_program, s_offsetBooty);
+    // pio_remove_program_and_unclaim_sm(&booty_program, c_pioBooty, c_smBooty, s_offsetBooty);
+}
+
+static void BOOTY_dmaHandler() {
+    // Disable the IRQ for this channel
+    dma_channel_set_irq0_enabled(BOOTY_dmaChannel, false);
+    // Clear the interrupt flag
+    dma_hw->ints0 = 1u << BOOTY_dmaChannel;
+    BOOTY_transferComplete = true;
+}
+
+int BOOTY_initDMA(const volatile void *read_addr, const unsigned int transfer_count) {
+    const int channel = dma_claim_unused_channel(true);
     dma_channel_config dmaConfig = dma_channel_get_default_config(channel);
 
     channel_config_set_read_increment(&dmaConfig, true);
     channel_config_set_write_increment(&dmaConfig, false);
     channel_config_set_transfer_data_size(&dmaConfig, DMA_SIZE_8);
+    channel_config_set_high_priority(&dmaConfig, true);
 
-    const unsigned int parallelDREQ = c_pioParallelOut == pio0 ? DREQ_PIO0_TX0 : DREQ_PIO1_TX0;
+    const unsigned int parallelDREQ = c_pioBooty == pio0 ? DREQ_PIO0_TX0 : DREQ_PIO1_TX0;
     channel_config_set_dreq(&dmaConfig, parallelDREQ);
 
-    dma_channel_configure(channel, &dmaConfig, &c_pioParallelOut->txf[c_smParallelOut], read_addr, transfer_count, true);
+    dma_channel_configure(channel, &dmaConfig, &c_pioBooty->txf[c_smBooty], read_addr, transfer_count, false);
+    // Tell the DMA to raise IRQ line 0 when the channel finishes a block
+    dma_channel_set_irq0_enabled(channel, true);
+    irq_set_exclusive_handler(DMA_IRQ_0, &BOOTY_dmaHandler);
+    dma_channel_start(channel);  // Start the DMA transfer
+    // Enable the IRQ for this channel
+    irq_set_enabled(DMA_IRQ_0, true);
 
     return channel;
 }
 
-void initParallelProgram(const PIO pio, const uint8_t sm, const uint8_t offset)
-{
-    pio_sm_config smConfig = parallel_program_get_default_config(offset);
+void BOOTY_initPIO(const PIO pio, const uint8_t sm, const uint8_t offset) {
+    pio_sm_config smConfig = booty_program_get_default_config(offset);
 
     // FIFO config
-    sm_config_set_out_shift(&smConfig, false, false, 8);  // 8 bits out, no autopull
-    sm_config_set_fifo_join(&smConfig, PIO_FIFO_JOIN_TX); // We don't need TX, so we can join it to RX for more space
+    sm_config_set_out_shift(&smConfig, false, false, 8);   // 8 bits out, no autopull
+    sm_config_set_fifo_join(&smConfig, PIO_FIFO_JOIN_TX);  // We don't need TX, so we can join it to RX for more space
 
     // CS + RD
     pio_gpio_init(pio, PIN_CS);
@@ -77,115 +99,43 @@ void initParallelProgram(const PIO pio, const uint8_t sm, const uint8_t offset)
 
     // Data
     pio_sm_set_consecutive_pindirs(pio, sm, PIN_D0, 8, false);
-    sm_config_set_out_pins(&smConfig, PIN_D0, 8); // Set pins D0-D7 for the out(pins) instruction
-    sm_config_set_set_pins(&smConfig, PIN_D0, 5); // Set pin D0 to D5 for the set(pindirs) instruction
-    for (uint pin = PIN_D0; pin < PIN_D0 + 8; pin++)
-    {
+    sm_config_set_out_pins(&smConfig, PIN_D0, 8);  // Set pins D0-D7 for the out(pins) instruction
+    sm_config_set_set_pins(&smConfig, PIN_D0, 5);  // Set pin D0 to D5 for the set(pindirs) instruction
+    for (uint pin = PIN_D0; pin < PIN_D0 + 8; pin++) {
         pio_gpio_init(pio, pin);
         gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
         gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_4MA);
     }
     // Sideset config, for controlling bits 5-7 of the data pins
-    sm_config_set_sideset(&smConfig, 3 + 1, true, true); // 3 bits sideset + 1 bit for SIDE_EN(optional sideset)
-    sm_config_set_sideset_pin_base(&smConfig, PIN_D5);   // Set the base pin for the sideset to D5
+    sm_config_set_sideset(&smConfig, 3 + 1, true, true);  // 3 bits sideset + 1 bit for SIDE_EN(optional sideset)
+    sm_config_set_sideset_pin_base(&smConfig, PIN_D5);    // Set the base pin for the sideset to D5
 
     // Push the config to the PIO state machine
     pio_sm_init(pio, sm, offset, &smConfig);
 }
 
-void resetCallback(uint gpio, uint32_t events)
-{
-    // resetPending = true;
-    if (events & GPIO_IRQ_LEVEL_LOW)
-    {
-        lastLowEvent = time_us_32();
-        // Disable low signal edge detection
-        gpio_set_irq_enabled(PIN_RST, GPIO_IRQ_LEVEL_LOW, false);
-        // Enable high signal edge detection
-        gpio_set_irq_enabled(PIN_RST, GPIO_IRQ_LEVEL_HIGH, true);
-    }
-    else if (events & GPIO_IRQ_LEVEL_HIGH)
-    {
-        // Disable the rising edge detection
-        gpio_set_irq_enabled(PIN_RST, GPIO_IRQ_LEVEL_HIGH, false);
-
-        const uint32_t c_now = time_us_32();
-        const uint32_t c_timeElapsed = c_now - lastLowEvent;
-        if (c_timeElapsed >= 500U) // Debounce, only reset if the pin was low for more than 500us(.5 ms)
-        {
-            resetPending = true;
-        }
-        else
-        {
-            // Enable the low signal edge detection again
-            gpio_set_irq_enabled(PIN_RST, GPIO_IRQ_LEVEL_LOW, true);
-        }
-    }
-}
-
-int Bootymain()
-{
+int BOOTY_arm() {
     const uint8_t *const c_payload = &c_payloadStart;
     const int c_payloadSize = &c_payloadEnd - &c_payloadStart;
 
-    // Disabled for now, re-enable if payload fails to load
-    // set_sys_clock_khz(250000, true); // Set clock to 250MHz
+    BOOTY_transferComplete = false;
 
-    // Initialize stdio for debugging
-    stdio_init_all();
-
-    // Initialize reset pin
-    gpio_init(PIN_RST);
     gpio_set_dir(PIN_RST, GPIO_IN);
 
-    initParallelProgram(c_pioParallelOut, c_smParallelOut, pio_add_program(c_pioParallelOut, &parallel_program));
+    s_offsetBooty = pio_add_program(c_pioBooty, &booty_program);
+    BOOTY_initPIO(c_pioBooty, c_smBooty, s_offsetBooty);
 
-    while (true)
-    {
-        int dmaChannel = initDMA(c_payload, c_payloadSize);
-        if (dmaChannel < 0)
-        {
-            printf("Failed to initialize DMA\n");
-            return 1;
-        }
+    BOOTY_dmaChannel = BOOTY_initDMA(c_payload, c_payloadSize);
 
-        // Reset the console and start the payload out program
-        gpio_set_dir(PIN_RST, GPIO_OUT);
-        gpio_put(PIN_RST, 0);
+    // Reset the console and start the payload out program
+    gpio_set_dir(PIN_RST, GPIO_OUT);
+    gpio_put(PIN_RST, 0);
 
-        pio_sm_set_enabled(c_pioParallelOut, c_smParallelOut, true);
-        sleep_ms(250); // Wait a bit for the console to reset
-        gpio_set_dir(PIN_RST, GPIO_IN);
+    pio_sm_set_enabled(c_pioBooty, c_smBooty, true);
+    sleep_ms(250);  // Wait a bit for the console to reset
+    gpio_set_dir(PIN_RST, GPIO_IN);
 
-        while (gpio_get(PIN_RST) == 0)
-        {
-            sleep_ms(1); // Wait for the reset pin to go high
-        }
-
-        // Enable an irq handler for the reset pin, only need to set the callback once
-        gpio_set_irq_enabled_with_callback(PIN_RST, GPIO_IRQ_LEVEL_LOW, true, &resetCallback);
-
-        while (!resetPending)
-        {
-            sleep_ms(1); // Nothing to do
-        }
-
-        // Both irq events are disabled now per the callback logic
-
-        while (gpio_get(PIN_RST) == 0)
-        {
-            sleep_ms(1); // Wait for the reset pin to go high
-        }
-
-        printf("Resetting...\n");
-        resetPending = false;
-
-        // Reset DMA and the PIO state machine
-        dma_channel_abort(dmaChannel);
-        dma_channel_unclaim(dmaChannel);
-        pio_sm_set_enabled(c_pioParallelOut, c_smParallelOut, false);
-        pio_sm_clear_fifos(c_pioParallelOut, c_smParallelOut);
-        pio_sm_restart(c_pioParallelOut, c_smParallelOut);
-        pio_sm_set_enabled(c_pioParallelOut, c_smParallelOut, true);
+    while (gpio_get(PIN_RST) == 0) {
+        sleep_ms(1);  // Wait for the reset pin to go high
     }
 }
