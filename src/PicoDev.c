@@ -4,6 +4,7 @@
 
 #include "booty.h"
 #include "comms.h"
+#include "hardware/clocks.h"
 #include "hardware/dma.h"
 #include "hardware/pio.h"
 #include "hardware/uart.h"
@@ -26,6 +27,8 @@ static void acknowledgeReset() {
 }
 
 int main() {
+    set_sys_clock_khz(250000, true);
+
     // Initialize stdio for debugging
     stdio_init_all();
 
@@ -51,7 +54,7 @@ int main() {
                     tight_loop_contents();
                 }
 
-                sleep_ms(5);     // De-init is happening too fast, so we need to wait a bit. Fix this later
+                sleep_ms(50);     // De-init is happening too fast, so we need to wait a bit. Fix this later
                 BOOTY_deinit();  // Deinitialize the booty program
 
                 programState++;
@@ -59,7 +62,7 @@ int main() {
             case 1:  // Comms mode
             {
                 printf("Comms mode\n");
-                //cpu_fifo();
+                cpu_fifo();
                 //
                 programState++;
             } break;
