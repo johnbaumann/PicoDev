@@ -87,7 +87,7 @@ void BOOTY_initPIO(const PIO pio, const uint8_t sm, const uint8_t offset) {
     pio_sm_config smConfig = booty_program_get_default_config(offset);
 
     // FIFO config
-    sm_config_set_out_shift(&smConfig, false, false, 8);   // 8 bits out, no autopull
+    sm_config_set_out_shift(&smConfig, false, true, 8);    // 8 bits out, autopull
     sm_config_set_fifo_join(&smConfig, PIO_FIFO_JOIN_TX);  // We don't need TX, so we can join it to RX for more space
 
     // CS + RD

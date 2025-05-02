@@ -17,7 +17,6 @@ idle:
     jmp pin idle                    ; jump to idle if RD is high
 
 ;pullData:
-    pull noblock                    ; pull data from FIFO
     out pins, 8                     ; pre-load data to pins
 
 ;enableOutput:
