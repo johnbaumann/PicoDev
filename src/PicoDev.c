@@ -23,7 +23,7 @@ static void acknowledgeReset() {
     printf("Resetting...\n");
     resetPending = false;
     BOOTY_transferComplete = false;
-    programState = 0;  // Reset the program state to BOOTY mode
+    programState = 1;  // Reset the program state to BOOTY mode
 }
 
 int main() {
@@ -62,7 +62,7 @@ int main() {
             case 1:  // Comms mode
             {
                 printf("Comms mode\n");
-                cpu_fifo();
+                COMMS_cpufifo();
                 //
                 programState++;
             } break;

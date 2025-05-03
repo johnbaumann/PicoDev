@@ -15,11 +15,19 @@ enum Pin {
     PIN_D5 = 8,
     PIN_D6 = 9,
     PIN_D7 = 10,
-    PIN_A0 = 11,
+    PIN_RST = 11,
     PIN_RD = 12,
     PIN_WR = 13,
     PIN_CS = 14,
-    PIN_RST = 15,
+    PIN_A0 = 15,
+    STATUS_D0 = 16,
+    STATUS_D1 = 17,
+    STATUS_D2 = 18,
+    STATUS_D3 = 19,
+    STATUS_D4 = 20,
+    STATUS_D5 = 21,
+    STATUS_D6 = 22,
+    STATUS_D7 = 23,
 };
 
 // To-do: Move this to the main file later
