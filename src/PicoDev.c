@@ -13,7 +13,7 @@
 bool resetPending = false;
 uint32_t lastLowEvent = 0;
 
-int programState = 1;  // 0 = BOOTY, 1 = Comms mode, 2 = Idle
+int programState = 0;  // 0 = BOOTY, 1 = Comms mode, 2 = Idle
 
 static void acknowledgeReset() {
     while (gpio_get(PIN_RST) == 0) {
@@ -27,10 +27,10 @@ static void acknowledgeReset() {
 }
 
 int main() {
-    set_sys_clock_khz(271200, true);
+    set_sys_clock_khz(250000, true);
 
     // Initialize stdio for debugging
-    //stdio_init_all();
+    stdio_init_all();
 
     // Initialize reset pin
     gpio_init(PIN_RST);
@@ -54,14 +54,15 @@ int main() {
                     tight_loop_contents();
                 }
 
-                sleep_ms(50);     // De-init is happening too fast, so we need to wait a bit. Fix this later
+                sleep_ms(50);    // De-init is happening too fast, so we need to wait a bit. Fix this later
                 BOOTY_deinit();  // Deinitialize the booty program
+                sleep_ms(50);    // De-init is happening too fast, so we need to wait a bit. Fix this later
 
                 programState++;
             } break;
             case 1:  // Comms mode
             {
-                //printf("Comms mode\n");
+                // printf("Comms mode\n");
                 COMMS_cpufifo();
                 programState++;
             } break;
