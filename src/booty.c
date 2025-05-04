@@ -19,7 +19,7 @@ int BOOTY_initDMA(const volatile void *read_addr, const unsigned int transfer_co
 void BOOTY_initPIO(const PIO pio, const uint8_t sm, const uint8_t offset);
 void resetCallback(uint gpio, uint32_t events);
 
-bool BOOTY_transferComplete = false;
+volatile bool BOOTY_transferComplete = false;
 
 static PIO const c_pioBooty = pio0;
 static const unsigned int c_smBooty = 0;

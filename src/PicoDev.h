@@ -31,7 +31,7 @@ enum Pin {
 };
 
 // To-do: Move this to the main file later
-extern bool resetPending;
+extern volatile bool resetPending;
 extern uint32_t lastLowEvent;
 
 void resetCallback(unsigned int gpio, uint32_t events);

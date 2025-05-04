@@ -23,7 +23,7 @@
 
 #define IRQ_UPDATESTATUS 0
 
-uint32_t statusreg = FT_STATUS_CONFIGURED | FT_STATUS_SPACE_AVAILABLE;
+volatile uint32_t statusreg = FT_STATUS_CONFIGURED | FT_STATUS_SPACE_AVAILABLE;
 
 static PIO pio_instance = pio0;
 
@@ -31,8 +31,6 @@ static uint sm_cpufifo;
 static uint sm_readdata;
 static uint sm_statuspins;
 static uint sm_writedata;
-
-static int8_t pio_status_irq;
 
 void COMMS_cpufifo(void);
 
@@ -49,6 +47,9 @@ void core1_entry() {
     tusb_init();
 
     while (1) {
+        if(resetPending){
+            break;
+        }
         tud_task();
 
         // USB READ, USB RX -> PIO TX
@@ -62,7 +63,7 @@ void core1_entry() {
             for (uint i = 0; i < count; i++) {
                 pio_instance->txf[sm_readdata] = datain[i];
             }
-            update_status_register();
+            //update_status_register();
         }
 
         // USB WRITE, PIO RX -> USB TX
@@ -71,7 +72,7 @@ void core1_entry() {
             uint8_t dataout[8];
             for (uint i = 0; i < len; i++) {
                 dataout[i] = pio_instance->rxf[sm_writedata];
-                update_status_register();
+                //update_status_register();
             }
 
             // Data gets discarded if the USB is not connected
@@ -87,73 +88,28 @@ void COMMS_cpufifo(void) {
     sm_cpufifo = pio_claim_unused_sm(pio_instance, true);
     sm_readdata = pio_claim_unused_sm(pio_instance, true);
     sm_writedata = pio_claim_unused_sm(pio_instance, true);
-    // sm_statuspins = pio_claim_unused_sm(pio_instance, true);
 
     uint offset_cpufifo = pio_add_program(pio_instance, &cpufifo_program);
     uint offset_readdata = pio_add_program(pio_instance, &readdata_program);
     uint offset_writedata = pio_add_program(pio_instance, &writedata_program);
-    // uint offset_statuspins = pio_add_program(pio_instance, &statuspins_program);
 
     init_cpufifo_program(pio_instance, sm_cpufifo, offset_cpufifo);
     init_readdata_program(pio_instance, sm_readdata, offset_readdata);
     init_writedata_program(pio_instance, sm_writedata, offset_writedata);
-    // init_statuspins_program(pio_instance, sm_statuspins, offset_statuspins);
 
     for (uint pin = STATUS_D0; pin <= STATUS_D7; pin++) {
         gpio_init(pin);
         gpio_set_dir(pin, GPIO_OUT);
     }
 
-    pio_status_irq = enable_irq(pio_instance, status_irq_handler, IRQ_UPDATESTATUS);
-
-    update_status_register();
-
     multicore_launch_core1(core1_entry);
 
     while (true) {
         update_status_register();
-        //tight_loop_contents();
-    }
-}
-
-static int8_t enable_irq(PIO pio, irq_handler_t handler, uint irq_num) {
-    irq_num %= 4;
-    int8_t pio_irq = (pio == pio0) ? PIO0_IRQ_0 : PIO1_IRQ_0;
-    enum pio_interrupt_source source = pis_interrupt0 + (irq_num);
-
-    // Enable interrupt
-    if (irq_get_exclusive_handler(pio_irq)) {
-        pio_irq++;
-        if (irq_get_exclusive_handler(pio_irq)) {
-            panic("All IRQs are in use");
+        if(resetPending){
+            break;
         }
     }
-
-    irq_set_exclusive_handler(pio_irq, handler);                                 // Set the IRQ handler
-    irq_set_enabled(pio_irq, true);                                              // Enable the IRQ
-    const uint irq_index = pio_irq - ((pio == pio0) ? PIO0_IRQ_0 : PIO1_IRQ_0);  // Get index of the IRQ
-    pio_set_irqn_source_enabled(pio, irq_index, source, true);  // Set pio to tell us when source irq is raised
-    pio_interrupt_clear(pio, irq_num);
-
-    return pio_irq;
-}
-
-static void init_statuspins_program(PIO pio, uint sm, uint offset) {
-    pio_sm_config c = statuspins_program_get_default_config(offset);
-
-    for (uint pin = STATUS_D0; pin <= STATUS_D7; pin++) {
-        pio_gpio_init(pio, pin);
-    }
-    pio_sm_set_consecutive_pindirs(pio, sm, STATUS_D0, 8, true);  // Set the pin direction to output
-
-    sm_config_set_out_pin_base(&c, STATUS_D0);  // Set the base pin for the sideset to D0
-    sm_config_set_out_pin_count(&c, 8);         // Set the number of output pins to 8
-    sm_config_set_out_shift(&c, false, true, 8);
-
-    pio_sm_init(pio, sm, offset, &c);
-    pio_sm_set_enabled(pio, sm, true);
-
-    // COMMS_initDMA(&statusreg, -1);  // Initialize the DMA transfer
 }
 
 static void init_cpufifo_program(PIO pio, uint sm, uint offset) {
@@ -237,13 +193,7 @@ static void init_writedata_program(PIO pio, uint sm, uint offset) {
     pio_sm_set_enabled(pio, sm_writedata, true);
 }
 
-static void status_irq_handler(void) {
-    //update_status_register();
-    pio_interrupt_clear(pio_instance, IRQ_UPDATESTATUS);
-}
-
 static inline void update_status_register(void) {
-    //uint32_t old_statusreg = statusreg;
     if (pio_sm_is_tx_fifo_empty(pio_instance, sm_readdata)) {
         statusreg &= ~FT_STATUS_DATA_AVAILABLE;
     } else {
@@ -256,26 +206,5 @@ static inline void update_status_register(void) {
         statusreg |= FT_STATUS_SPACE_AVAILABLE;
     }
 
-    //if (statusreg != old_statusreg) {
-        gpio_put_masked(0xFF << STATUS_D0, statusreg << STATUS_D0);  // Set the status pins to the status register value
-    //}
-}
-
-static int COMMS_initDMA(const volatile void *read_addr, const unsigned int transfer_count) {
-    const int channel = dma_claim_unused_channel(true);
-    dma_channel_config dmaConfig = dma_channel_get_default_config(channel);
-
-    channel_config_set_read_increment(&dmaConfig, false);
-    channel_config_set_write_increment(&dmaConfig, false);
-    channel_config_set_transfer_data_size(&dmaConfig, DMA_SIZE_8);
-    channel_config_set_high_priority(&dmaConfig, true);
-
-    const unsigned int parallelDREQ = (pio_instance == pio0 ? DREQ_PIO0_TX0 : DREQ_PIO1_TX0) + sm_statuspins;
-    // const unsigned int parallelDREQ = DREQ_PIO0_TX0;
-    channel_config_set_dreq(&dmaConfig, parallelDREQ);
-
-    channel_config_set_ring(&dmaConfig, false, 1);  // Enable ring buffer mode on reads with a size of 1 << 1
-    dma_channel_configure(channel, &dmaConfig, &pio_instance->txf[sm_statuspins], read_addr, transfer_count, true);
-
-    return channel;
+    gpio_put_masked(0xFF << STATUS_D0, statusreg << STATUS_D0);  // Set the status pins to the status register value
 }

@@ -7,10 +7,11 @@
 #include "hardware/clocks.h"
 #include "hardware/dma.h"
 #include "hardware/pio.h"
+#include "hardware/vreg.h"
 #include "hardware/uart.h"
 #include "pico/stdlib.h"
 
-bool resetPending = false;
+volatile bool resetPending = false;
 uint32_t lastLowEvent = 0;
 
 int programState = 0;  // 0 = BOOTY, 1 = Comms mode, 2 = Idle
@@ -23,11 +24,14 @@ static void acknowledgeReset() {
     printf("Resetting...\n");
     resetPending = false;
     BOOTY_transferComplete = false;
-    programState = 1;  // Reset the program state to BOOTY mode
+    programState = 0;  // Reset the program state to BOOTY mode
 }
 
 int main() {
-    set_sys_clock_khz(250000, true);
+    vreg_set_voltage(VREG_VOLTAGE_1_15);  // Set the voltage regulator to 1.15V
+    sleep_ms(100);                        // Wait for the voltage regulator to stabilize
+    set_sys_clock_khz(271200, true);
+    sleep_ms(100);  // Wait for the system clock to stabilize
 
     // Initialize stdio for debugging
     stdio_init_all();

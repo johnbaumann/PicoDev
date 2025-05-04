@@ -7,7 +7,7 @@
 .global c_payloadEnd
 
 c_payloadStart:
-.incbin "../payload/unirom_r.booty"
+.incbin "../payload/psx232h.booty"
 
 c_payloadEnd:
 

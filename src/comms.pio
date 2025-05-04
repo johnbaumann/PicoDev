@@ -2,14 +2,6 @@
 .define GPIO_WR     13
 .define GPIO_CS     14
 
-
-; Auto-pulls data from FIFO and pushes it to the pins
-; The value of the pins is grabbed from the other SM
-; This is the closest thing to accessing memory directly
-.program statuspins
-    out pins, 8
-.wrap
-
 ; Output data to pins from TX FIFO
 .program readdata
 .side_set 3 opt pindirs
@@ -20,11 +12,11 @@ idle:
     jmp pin idle                    ; jmp to idle if rd not asserted
     in pins, 1                      ; read the address pin
     mov y, isr                      ; Copy ISR to y so we can branch on address pin
-    jmp y-- idle                    ; Address pin is high, send data, otherwise, status
+    jmp y-- idle                    ; Address pin is high, send data
     pull noblock
     out pins, 8
     set pindirs, 0b11111 side 0b111 ; set 8 data pins to output
-    WAIT 1 GPIO GPIO_CS             ; Wait for CS to end
+    WAIT 1 GPIO GPIO_RD             ; Wait for CS to end
     set pindirs, 0b00000 side 0b000 ; Set 8 data pins to input
 .wrap
 
@@ -45,7 +37,7 @@ idle:
     in null, 24
     mov pins, isr                   ; Copy the ISR register to the pins
     set pindirs, 0b11111 side 0b111 ; set 8 data pins to output
-    WAIT 1 GPIO GPIO_CS             ; Wait for CS to end
+    WAIT 1 GPIO GPIO_RD             ; Wait for CS to end
     set pindirs, 0b00000 side 0b000 ; Set 8 data pins to input
 .wrap
 

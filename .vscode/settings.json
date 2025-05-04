@@ -40,6 +40,9 @@
         "stdio.h": "c",
         "comms.h": "c",
         "booty.h": "c",
-        "clocks.h": "c"
+        "clocks.h": "c",
+        "pio.h": "c",
+        "stdlib.h": "c",
+        "cstdint": "c"
     }
 }
