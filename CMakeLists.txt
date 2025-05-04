@@ -53,7 +53,7 @@ pico_generate_pio_header(PicoDev
 )
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(PicoDev 1)
+pico_enable_stdio_uart(PicoDev 0)
 pico_enable_stdio_usb(PicoDev 0)
 
 # Add the standard library to the build
@@ -72,6 +72,7 @@ target_include_directories(PicoDev PRIVATE
 target_link_libraries(PicoDev 
         hardware_dma
         hardware_pio
+        pico_multicore
         pico_unique_id
         tinyusb_device
 )

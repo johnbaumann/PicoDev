@@ -1,4 +1,3 @@
-.define GPIO_ADDR   11
 .define GPIO_RD     12
 .define GPIO_WR     13
 .define GPIO_CS     14
@@ -72,6 +71,6 @@ idle:
     push noblock                    ; push the data onto the RX FIFO
 
 ;writestall:
-    irq nowait IRQ_UPDATESTATUS     ; Wait for cpu to update status bit
     wait 1 GPIO GPIO_WR             ; Wait for WR to finish
+    irq nowait IRQ_UPDATESTATUS     ; Wait for cpu to update status bit
 .wrap

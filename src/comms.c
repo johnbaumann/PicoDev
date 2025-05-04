@@ -12,6 +12,7 @@
 #include "hardware/clocks.h"
 #include "hardware/dma.h"
 #include "hardware/pio.h"
+#include "pico/multicore.h"
 #include "pico/platform.h"
 #include "pico/stdlib.h"
 
@@ -44,70 +45,65 @@ static void init_writedata_program(PIO pio, uint sm, uint offset);
 static void status_irq_handler(void);
 static void update_status_register(void);
 
-/*void core1_entry()
-{
+void core1_entry() {
     tusb_init();
 
-    while (1)
-    {
+    while (1) {
         tud_task();
 
         // USB READ, USB RX -> PIO TX
-        if (!pio_sm_is_tx_fifo_full(pio_instance, sm_readdata) && tud_cdc_n_available(0))
-        {
+        if (!pio_sm_is_tx_fifo_full(pio_instance, sm_readdata) && tud_cdc_n_available(0)) {
             uint cdc_available = tud_cdc_n_available(0);
             uint pio_fifo_space = 8 - pio_sm_get_tx_fifo_level(pio_instance, sm_readdata);
             uint len = MIN(pio_fifo_space, cdc_available);
             uint8_t datain[8];
             uint count = tud_cdc_n_read(0, &datain, len);
 
-            for (uint i = 0; i < count; i++)
-            {
+            for (uint i = 0; i < count; i++) {
                 pio_instance->txf[sm_readdata] = datain[i];
             }
             update_status_register();
         }
 
         // USB WRITE, PIO RX -> USB TX
-        if (!pio_sm_is_rx_fifo_empty(pio_instance, sm_writedata))
-        {
+        if (!pio_sm_is_rx_fifo_empty(pio_instance, sm_writedata)) {
             uint len = pio_sm_get_rx_fifo_level(pio_instance, sm_writedata);
             uint8_t dataout[len];
-            for (uint i = 0; i < len; i++)
-            {
+            for (uint i = 0; i < len; i++) {
                 dataout[i] = pio_instance->rxf[sm_writedata];
             }
 
             // Data gets discarded if the USB is not connected
-            if (tud_cdc_n_connected(0))
-            {
+            if (tud_cdc_n_connected(0)) {
                 tud_cdc_n_write(0, &dataout, len);
                 tud_cdc_n_write_flush(0);
             }
             update_status_register();
         }
     }
-}*/
+}
 
 void COMMS_cpufifo(void) {
     sm_cpufifo = pio_claim_unused_sm(pio_instance, true);
     sm_readdata = pio_claim_unused_sm(pio_instance, true);
     sm_writedata = pio_claim_unused_sm(pio_instance, true);
-    sm_statuspins = pio_claim_unused_sm(pio1, true);
+    sm_statuspins = pio_claim_unused_sm(pio_instance, true);
 
     uint offset_cpufifo = pio_add_program(pio_instance, &cpufifo_program);
     uint offset_readdata = pio_add_program(pio_instance, &readdata_program);
     uint offset_writedata = pio_add_program(pio_instance, &writedata_program);
-    uint offset_statuspins = pio_add_program(pio1, &statuspins_program);
+    uint offset_statuspins = pio_add_program(pio_instance, &statuspins_program);
 
     init_cpufifo_program(pio_instance, sm_cpufifo, offset_cpufifo);
     init_readdata_program(pio_instance, sm_readdata, offset_readdata);
-    init_writedata_program(pio_instance, sm_readdata, offset_writedata);
-    init_statuspins_program(pio1, sm_statuspins, offset_statuspins);
+    init_writedata_program(pio_instance, sm_writedata, offset_writedata);
+    init_statuspins_program(pio_instance, sm_statuspins, offset_statuspins);
 
     pio_status_irq = enable_irq(pio_instance, status_irq_handler, IRQ_UPDATESTATUS);
 
     update_status_register();
+
+    multicore_launch_core1(core1_entry);
 
     while (true) {
         tight_loop_contents();
@@ -156,7 +152,6 @@ static void init_statuspins_program(PIO pio, uint sm, uint offset) {
 
 static void init_cpufifo_program(PIO pio, uint sm, uint offset) {
     pio_sm_config c = cpufifo_program_get_default_config(offset);
-    // Setup data pins and data out state machine
 
     // Data pins
     for (uint pin = PIN_D0; pin <= PIN_D7; pin++) {
@@ -166,23 +161,20 @@ static void init_cpufifo_program(PIO pio, uint sm, uint offset) {
         gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
         gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_4MA);
     }
+    pio_sm_set_consecutive_pindirs(pio, sm, PIN_D0, 8, false);  // Set the data pins to input
 
-    gpio_put_masked(PIN_D0, 0xFF);  // Set all data pins to high
-    for (uint pin = PIN_A0; pin <= PIN_CS; pin++) {
+    // Control pins
+    for (uint pin = PIN_RD; pin <= PIN_A0; pin++) {
         pio_gpio_init(pio, pin);
         gpio_set_pulls(pin, false, false);
         gpio_set_input_enabled(pin, true);
     }
 
-    pio_sm_set_consecutive_pindirs(pio, sm, PIN_D0, 8, false);
-
     sm_config_set_in_pins(&c, PIN_A0);
-    sm_config_set_in_pin_count(&c, 9);  // Set the number of input pins to 9
+    sm_config_set_in_pin_count(&c, 9);  // In pins A0, STATUS_D0 to STATUS_D7
     sm_config_set_in_shift(&c, true, false, 1);
     sm_config_set_out_pins(&c, PIN_D0, 8);
     sm_config_set_jmp_pin(&c, PIN_RD);
-    sm_config_set_out_shift(&c, false, false, 8);
-    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);  // We don't need TX, so we can join it to RX for more space
 
     sm_config_set_set_pins(&c, PIN_D0, 5);         // Set pin D0 to D5 for the set(pindirs) instruction
     sm_config_set_sideset(&c, 3 + 1, true, true);  // 3 bits sideset + 1 bit for SIDE_EN(optional sideset)
@@ -212,7 +204,6 @@ static void init_readdata_program(PIO pio, uint sm, uint offset) {
 
 static void init_writedata_program(PIO pio, uint sm, uint offset) {
     // Setup WR state machine
-    pio_sm_set_consecutive_pindirs(pio, sm_writedata, PIN_D0, PIN_CS - PIN_D0, false);
     pio_gpio_init(pio, PIN_CS);
     pio_gpio_init(pio, PIN_WR);
     gpio_set_pulls(PIN_CS, false, false);
@@ -220,19 +211,21 @@ static void init_writedata_program(PIO pio, uint sm, uint offset) {
     gpio_set_input_enabled(PIN_CS, true);
     gpio_set_input_enabled(PIN_WR, true);
 
-    uint offset_writedata = pio_add_program(pio, &writedata_program);
-    pio_sm_config c = writedata_program_get_default_config(offset_writedata);
+    pio_sm_config c = writedata_program_get_default_config(offset);
 
-    for (uint pin = PIN_D0; pin <= PIN_WR; pin++) {
+    for (uint pin = PIN_D0; pin <= PIN_D7; pin++) {
         pio_gpio_init(pio, pin);
-        gpio_set_input_enabled(pin, true);
     }
+
+    pio_sm_set_consecutive_pindirs(pio, sm_writedata, PIN_D0, 8, false);  // Set the pin direction to input
+
     sm_config_set_in_pins(&c, PIN_D0);
+    sm_config_set_in_pin_count(&c, 8);  // Set the number of input pins to 8
     sm_config_set_jmp_pin(&c, PIN_WR);
     sm_config_set_in_shift(&c, false, false, 8);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
 
-    pio_sm_init(pio, sm_writedata, offset_writedata, &c);
+    pio_sm_init(pio, sm_writedata, offset, &c);
     pio_sm_set_enabled(pio, sm_writedata, true);
 }
 
@@ -250,7 +243,7 @@ static inline void update_status_register(void) {
 
     if (pio_sm_is_rx_fifo_full(pio_instance, sm_writedata)) {
         statusreg &= ~FT_STATUS_SPACE_AVAILABLE;
-    } else { 
+    } else {
         statusreg |= FT_STATUS_SPACE_AVAILABLE;
     }
 }
@@ -264,12 +257,12 @@ static int COMMS_initDMA(const volatile void *read_addr, const unsigned int tran
     channel_config_set_transfer_data_size(&dmaConfig, DMA_SIZE_8);
     channel_config_set_high_priority(&dmaConfig, true);
 
-    // const unsigned int parallelDREQ = pio_instance == pio0 ? DREQ_PIO0_TX0 : DREQ_PIO1_TX0;
-    const unsigned int parallelDREQ = DREQ_PIO1_TX0;
+    const unsigned int parallelDREQ = (pio_instance == pio0 ? DREQ_PIO0_TX0 : DREQ_PIO1_TX0) + sm_statuspins;
+    // const unsigned int parallelDREQ = DREQ_PIO0_TX0;
     channel_config_set_dreq(&dmaConfig, parallelDREQ);
 
     channel_config_set_ring(&dmaConfig, false, 1);  // Enable ring buffer mode on reads with a size of 1 << 1
-    dma_channel_configure(channel, &dmaConfig, &pio1->txf[sm_statuspins], read_addr, transfer_count, true);
+    dma_channel_configure(channel, &dmaConfig, &pio_instance->txf[sm_statuspins], read_addr, transfer_count, true);
 
     return channel;
 }
