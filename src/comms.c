@@ -24,6 +24,7 @@
 #define IRQ_UPDATESTATUS 0
 
 volatile uint32_t statusreg = FT_STATUS_CONFIGURED | FT_STATUS_SPACE_AVAILABLE;
+volatile bool core1Running = false;
 
 static const PIO pio_instance = pio0;
 
@@ -33,17 +34,37 @@ static const uint sm_writedata = 2;
 
 void COMMS_cpufifo(void);
 
-static int COMMS_initDMA(const volatile void *read_addr, const unsigned int transfer_count);
-static int8_t enable_irq(PIO pio, irq_handler_t handler, uint irq_num);
-static void init_cpufifo_program(PIO pio, uint sm, uint offset);
+static void init_readstatus_program(PIO pio, uint sm, uint offset);
 static void init_readdata_program(PIO pio, uint sm, uint offset);
-static void init_statuspins_program(PIO pio, uint sm, uint offset);
 static void init_writedata_program(PIO pio, uint sm, uint offset);
-static void status_irq_handler(void);
 static void update_status_register(void);
 
 void core1_entry() {
-    tusb_init();
+    core1Running = true;
+    while (true) {
+        update_status_register();
+        if (resetPending) {
+            break;
+        }
+    }
+    core1Running = false;
+}
+
+void COMMS_cpufifo(void) {
+    uint offset_readdata = pio_add_program(pio_instance, &readdata_program);
+    uint offset_readstatus = pio_add_program(pio_instance, &readstatus_program);
+    uint offset_writedata = pio_add_program(pio_instance, &writedata_program);
+
+    init_readstatus_program(pio_instance, sm_cpufifo, offset_readstatus);
+    init_readdata_program(pio_instance, sm_readdata, offset_readdata);
+    init_writedata_program(pio_instance, sm_writedata, offset_writedata);
+
+    for (uint pin = STATUS_D0; pin <= STATUS_D7; pin++) {
+        gpio_init(pin);
+        gpio_set_dir(pin, GPIO_OUT);
+    }
+
+    multicore_launch_core1(core1_entry);
 
     while (1) {
         if (resetPending) {
@@ -77,38 +98,22 @@ void core1_entry() {
             }
         }
     }
+
+    pio_sm_set_enabled(pio_instance, sm_cpufifo, false);
+    pio_sm_set_enabled(pio_instance, sm_readdata, false);
+    pio_sm_set_enabled(pio_instance, sm_writedata, false);
+    pio_remove_program(pio_instance, &readdata_program, offset_readdata);
+    pio_remove_program(pio_instance, &readstatus_program, offset_readstatus);
+    pio_remove_program(pio_instance, &writedata_program, offset_writedata);
+
+    while(core1Running) {
+        tight_loop_contents();  // Wait for core1 to finish
+    }
+    multicore_reset_core1();
 }
 
-void COMMS_cpufifo(void) {
-    // sm_cpufifo = pio_claim_unused_sm(pio_instance, true);
-    // sm_readdata = pio_claim_unused_sm(pio_instance, true);
-    // sm_writedata = pio_claim_unused_sm(pio_instance, true);
-
-    uint offset_cpufifo = pio_add_program(pio_instance, &cpufifo_program);
-    uint offset_readdata = pio_add_program(pio_instance, &readdata_program);
-    uint offset_writedata = pio_add_program(pio_instance, &writedata_program);
-
-    init_cpufifo_program(pio_instance, sm_cpufifo, offset_cpufifo);
-    init_readdata_program(pio_instance, sm_readdata, offset_readdata);
-    init_writedata_program(pio_instance, sm_writedata, offset_writedata);
-
-    for (uint pin = STATUS_D0; pin <= STATUS_D7; pin++) {
-        gpio_init(pin);
-        gpio_set_dir(pin, GPIO_OUT);
-    }
-
-    multicore_launch_core1(core1_entry);
-
-    while (true) {
-        update_status_register();
-        if (resetPending) {
-            break;
-        }
-    }
-}
-
-static void init_cpufifo_program(PIO pio, uint sm, uint offset) {
-    pio_sm_config c = cpufifo_program_get_default_config(offset);
+static void init_readstatus_program(PIO pio, uint sm, uint offset) {
+    pio_sm_config c = readstatus_program_get_default_config(offset);
 
     // Data pins
     for (uint pin = PIN_D0; pin <= PIN_D7; pin++) {
@@ -186,10 +191,6 @@ static void init_writedata_program(PIO pio, uint sm, uint offset) {
 
     pio_sm_init(pio, sm_writedata, offset, &c);
     pio_sm_set_enabled(pio, sm_writedata, true);
-}
-
-static inline bool tx_fifo_has_data(PIO pio, uint sm) {
-    return (pio->fstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + sm))) > 0;
 }
 
 static inline void update_status_register(void) {

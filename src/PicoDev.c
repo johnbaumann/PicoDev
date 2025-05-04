@@ -1,14 +1,15 @@
 #include "PicoDev.h"
 
 #include <stdio.h>
+#include <tusb.h>
 
 #include "booty.h"
 #include "comms.h"
 #include "hardware/clocks.h"
 #include "hardware/dma.h"
 #include "hardware/pio.h"
-#include "hardware/vreg.h"
 #include "hardware/uart.h"
+#include "hardware/vreg.h"
 #include "pico/stdlib.h"
 
 volatile bool resetPending = false;
@@ -34,6 +35,8 @@ int main() {
 
     // Initialize reset pin
     gpio_init(PIN_RST);
+
+    tusb_init();
 
     while (true) {
         // Run the booty program

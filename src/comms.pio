@@ -22,7 +22,7 @@ idle:
 
 
 ; Monitor the RD signal, push status to pins or trigger data out
-.program cpufifo
+.program readstatus
 .side_set 3 opt pindirs
 
 idle:
