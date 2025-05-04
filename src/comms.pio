@@ -16,7 +16,7 @@ idle:
     pull noblock
     out pins, 8
     set pindirs, 0b11111 side 0b111 ; set 8 data pins to output
-    WAIT 1 GPIO GPIO_RD             ; Wait for CS to end
+    WAIT 1 GPIO GPIO_CS             ; Wait for CS to end
     set pindirs, 0b00000 side 0b000 ; Set 8 data pins to input
 .wrap
 
@@ -37,7 +37,7 @@ idle:
     in null, 24
     mov pins, isr                   ; Copy the ISR register to the pins
     set pindirs, 0b11111 side 0b111 ; set 8 data pins to output
-    WAIT 1 GPIO GPIO_RD             ; Wait for CS to end
+    WAIT 1 GPIO GPIO_CS             ; Wait for CS to end
     set pindirs, 0b00000 side 0b000 ; Set 8 data pins to input
 .wrap
 

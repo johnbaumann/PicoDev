@@ -25,12 +25,11 @@
 
 volatile uint32_t statusreg = FT_STATUS_CONFIGURED | FT_STATUS_SPACE_AVAILABLE;
 
-static PIO pio_instance = pio0;
+static const PIO pio_instance = pio0;
 
-static uint sm_cpufifo;
-static uint sm_readdata;
-static uint sm_statuspins;
-static uint sm_writedata;
+static const uint sm_cpufifo = 0;
+static const uint sm_readdata = 1;
+static const uint sm_writedata = 2;
 
 void COMMS_cpufifo(void);
 
@@ -47,23 +46,20 @@ void core1_entry() {
     tusb_init();
 
     while (1) {
-        if(resetPending){
+        if (resetPending) {
             break;
         }
         tud_task();
 
         // USB READ, USB RX -> PIO TX
         if (!pio_sm_is_tx_fifo_full(pio_instance, sm_readdata) && tud_cdc_n_available(0)) {
-            uint cdc_available = tud_cdc_n_available(0);
-            uint pio_fifo_space = 8 - pio_sm_get_tx_fifo_level(pio_instance, sm_readdata);
-            uint len = MIN(pio_fifo_space, cdc_available);
             uint8_t datain[8];
-            uint count = tud_cdc_n_read(0, &datain, len);
+            uint len = MIN(8 - pio_sm_get_tx_fifo_level(pio_instance, sm_readdata), tud_cdc_n_available(0));
+            const uint count = tud_cdc_n_read(0, datain, len);
 
             for (uint i = 0; i < count; i++) {
                 pio_instance->txf[sm_readdata] = datain[i];
             }
-            //update_status_register();
         }
 
         // USB WRITE, PIO RX -> USB TX
@@ -72,12 +68,11 @@ void core1_entry() {
             uint8_t dataout[8];
             for (uint i = 0; i < len; i++) {
                 dataout[i] = pio_instance->rxf[sm_writedata];
-                //update_status_register();
             }
 
             // Data gets discarded if the USB is not connected
             if (tud_cdc_n_connected(0)) {
-                tud_cdc_n_write(0, &dataout, len);
+                tud_cdc_n_write(0, dataout, len);
                 tud_cdc_n_write_flush(0);
             }
         }
@@ -85,9 +80,9 @@ void core1_entry() {
 }
 
 void COMMS_cpufifo(void) {
-    sm_cpufifo = pio_claim_unused_sm(pio_instance, true);
-    sm_readdata = pio_claim_unused_sm(pio_instance, true);
-    sm_writedata = pio_claim_unused_sm(pio_instance, true);
+    // sm_cpufifo = pio_claim_unused_sm(pio_instance, true);
+    // sm_readdata = pio_claim_unused_sm(pio_instance, true);
+    // sm_writedata = pio_claim_unused_sm(pio_instance, true);
 
     uint offset_cpufifo = pio_add_program(pio_instance, &cpufifo_program);
     uint offset_readdata = pio_add_program(pio_instance, &readdata_program);
@@ -106,7 +101,7 @@ void COMMS_cpufifo(void) {
 
     while (true) {
         update_status_register();
-        if(resetPending){
+        if (resetPending) {
             break;
         }
     }
@@ -193,18 +188,15 @@ static void init_writedata_program(PIO pio, uint sm, uint offset) {
     pio_sm_set_enabled(pio, sm_writedata, true);
 }
 
-static inline void update_status_register(void) {
-    if (pio_sm_is_tx_fifo_empty(pio_instance, sm_readdata)) {
-        statusreg &= ~FT_STATUS_DATA_AVAILABLE;
-    } else {
-        statusreg |= FT_STATUS_DATA_AVAILABLE;
-    }
+static inline bool tx_fifo_has_data(PIO pio, uint sm) {
+    return (pio->fstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + sm))) > 0;
+}
 
-    if (pio_sm_is_rx_fifo_full(pio_instance, sm_writedata)) {
-        statusreg &= ~FT_STATUS_SPACE_AVAILABLE;
-    } else {
-        statusreg |= FT_STATUS_SPACE_AVAILABLE;
-    }
+static inline void update_status_register(void) {
+    const bool dataAvailable = (pio_instance->fstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + sm_readdata))) == 0;
+    const bool spaceAvailable = (pio_instance->fstat & (1u << (PIO_FSTAT_RXFULL_LSB + sm_writedata))) == 0;
+
+    statusreg = FT_STATUS_CONFIGURED | (spaceAvailable << 1) | (dataAvailable << 0);
 
     gpio_put_masked(0xFF << STATUS_D0, statusreg << STATUS_D0);  // Set the status pins to the status register value
 }

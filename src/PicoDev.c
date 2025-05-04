@@ -21,7 +21,6 @@ static void acknowledgeReset() {
         tight_loop_contents();  // Wait for the reset pin to go high
     }
 
-    printf("Resetting...\n");
     resetPending = false;
     BOOTY_transferComplete = false;
     programState = 0;  // Reset the program state to BOOTY mode
@@ -32,9 +31,6 @@ int main() {
     sleep_ms(100);                        // Wait for the voltage regulator to stabilize
     set_sys_clock_khz(271200, true);
     sleep_ms(100);  // Wait for the system clock to stabilize
-
-    // Initialize stdio for debugging
-    stdio_init_all();
 
     // Initialize reset pin
     gpio_init(PIN_RST);
@@ -66,7 +62,6 @@ int main() {
             } break;
             case 1:  // Comms mode
             {
-                // printf("Comms mode\n");
                 COMMS_cpufifo();
                 programState++;
             } break;
