@@ -1,5 +1,6 @@
+.define GPIO_CS     1
 .define GPIO_WR     13
-.define GPIO_CS     14
+
 
 ; Output data to pins from TX FIFO
 .program readdata
