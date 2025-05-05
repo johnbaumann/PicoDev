@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stdbool.h>
-#include <stdint.h>
 
 enum Pin {
     // UART0_TX = 0,
@@ -31,7 +30,4 @@ enum Pin {
 };
 
 // To-do: Move this to the main file later
-extern volatile bool resetPending;
-extern uint32_t lastLowEvent;
-
-void resetCallback(unsigned int gpio, uint32_t events);
+extern volatile bool g_resetPending;

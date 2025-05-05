@@ -1,3 +1,3 @@
 #pragma once
 
-void COMMS_cpufifo(void);
+void COMMS_cpuFIFO(void);

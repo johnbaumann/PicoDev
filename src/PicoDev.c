@@ -12,22 +12,25 @@
 #include "hardware/vreg.h"
 #include "pico/stdlib.h"
 
-volatile bool resetPending = false;
-uint32_t lastLowEvent = 0;
+volatile bool g_resetPending = false;
+static uint32_t s_lastLowEvent = 0;
 
-int programState = 0;  // 0 = BOOTY, 1 = Comms mode, 2 = Idle
+static int s_programState = 0;  // 0 = BOOTY, 1 = Comms mode, 2 = Idle
 
-static void acknowledgeReset() {
+static void acknowledgeReset(void);
+static void resetCallback(unsigned int gpio, uint32_t events);
+
+static void acknowledgeReset(void) {
     while (gpio_get(PIN_RST) == 0) {
         tight_loop_contents();  // Wait for the reset pin to go high
     }
 
-    resetPending = false;
+    g_resetPending = false;
     BOOTY_transferComplete = false;
-    programState = 0;  // Reset the program state to BOOTY mode
+    s_programState = 0;  // Reset the program state to BOOTY mode
 }
 
-int main() {
+int main(void) {
     vreg_set_voltage(VREG_VOLTAGE_1_15);  // Set the voltage regulator to 1.15V
     sleep_ms(100);                        // Wait for the voltage regulator to stabilize
     set_sys_clock_khz(271200, true);
@@ -43,17 +46,18 @@ int main() {
         // Wait for the transfer to complete or a reset occurs
         // Enter comms mode until a reset occurs
 
-        switch (programState) {
+        switch (s_programState) {
             case 0:  // BOOTY mode
             {
-                gpio_set_irq_enabled(PIN_RST, GPIO_IRQ_LEVEL_LOW, false);
-                gpio_set_irq_enabled(PIN_RST, GPIO_IRQ_LEVEL_HIGH, false);  // Disable the irq handler for the reset pin
+                // Disable the reset pin IRQ
+                gpio_set_irq_enabled(PIN_RST, GPIO_IRQ_LEVEL_LOW | GPIO_IRQ_LEVEL_HIGH, false);
 
                 BOOTY_arm();
 
+                // Enable the reset pin IRQ
                 gpio_set_irq_enabled_with_callback(PIN_RST, GPIO_IRQ_LEVEL_LOW, true, &resetCallback);
 
-                while (!BOOTY_transferComplete && !resetPending) {
+                while (!BOOTY_transferComplete && !g_resetPending) {
                     tight_loop_contents();
                 }
 
@@ -61,12 +65,12 @@ int main() {
                 BOOTY_deinit();  // Deinitialize the booty program
                 sleep_ms(50);    // De-init is happening too fast, so we need to wait a bit. Fix this later
 
-                programState++;
+                s_programState++;
             } break;
             case 1:  // Comms mode
             {
-                COMMS_cpufifo();
-                programState++;
+                COMMS_cpuFIFO();
+                s_programState++;
             } break;
 
             case 2:  // Idle mode
@@ -74,15 +78,15 @@ int main() {
             } break;
         }
 
-        if (resetPending) {
+        if (g_resetPending) {
             acknowledgeReset();
         }
     }
 }
 
-void resetCallback(unsigned int gpio, uint32_t events) {
+static void resetCallback(unsigned int gpio, uint32_t events) {
     if (events & GPIO_IRQ_LEVEL_LOW) {
-        lastLowEvent = time_us_32();
+        s_lastLowEvent = time_us_32();
         // Disable low signal edge detection
         gpio_set_irq_enabled(PIN_RST, GPIO_IRQ_LEVEL_LOW, false);
         // Enable high signal edge detection
@@ -92,10 +96,10 @@ void resetCallback(unsigned int gpio, uint32_t events) {
         gpio_set_irq_enabled(PIN_RST, GPIO_IRQ_LEVEL_HIGH, false);
 
         const uint32_t c_now = time_us_32();
-        const uint32_t c_timeElapsed = c_now - lastLowEvent;
+        const uint32_t c_timeElapsed = c_now - s_lastLowEvent;
         if (c_timeElapsed >= 500U)  // Debounce, only reset if the pin was low for more than 500us(.5 ms)
         {
-            resetPending = true;
+            g_resetPending = true;
         } else {
             // Enable the low signal edge detection again
             gpio_set_irq_enabled(PIN_RST, GPIO_IRQ_LEVEL_LOW, true);

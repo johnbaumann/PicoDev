@@ -1,4 +1,3 @@
-.define GPIO_RD     12
 .define GPIO_WR     13
 .define GPIO_CS     14
 

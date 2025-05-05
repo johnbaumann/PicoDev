@@ -15,9 +15,10 @@
 
 extern const uint8_t c_payloadStart, c_payloadEnd;
 
-int BOOTY_initDMA(const volatile void *read_addr, const unsigned int transfer_count);
-void BOOTY_initPIO(const PIO pio, const uint8_t sm, const uint8_t offset);
-void resetCallback(uint gpio, uint32_t events);
+void BOOTY_deinit(void);
+
+static int initDMA(const volatile void *read_addr, const unsigned int transfer_count);
+static void initPIO(const PIO pio, const uint8_t sm, const uint8_t offset);
 
 volatile bool BOOTY_transferComplete = false;
 
@@ -25,42 +26,44 @@ static PIO const c_pioBooty = pio0;
 static const unsigned int c_smBooty = 0;
 static unsigned int s_offsetBooty = 0;
 
-static int BOOTY_dmaChannel = -1;
+static int s_dmaChannel = -1;
 
-static void BOOTY_deinitDMA();
-static void BOOTY_deinitPIO();
+static void deinitDMA(void);
+static void deinitPIO(void);
 
-void BOOTY_deinit() {
-    BOOTY_deinitDMA();
-    BOOTY_deinitPIO();
+void BOOTY_deinit(void) {
+    deinitDMA();
+    deinitPIO();    
 }
 
-static void BOOTY_deinitDMA() {
-    if (BOOTY_dmaChannel >= 0) {
-        dma_channel_abort(BOOTY_dmaChannel);
-        dma_channel_unclaim(BOOTY_dmaChannel);
-        dma_channel_set_irq0_enabled(BOOTY_dmaChannel, false);  // Disable the IRQ for this channel
-        BOOTY_dmaChannel = -1;
+static void deinitDMA(void) {
+    if (s_dmaChannel >= 0) {
+        dma_channel_wait_for_finish_blocking(s_dmaChannel);  // Wait for the DMA transfer to finish
+        dma_channel_cleanup(s_dmaChannel);
+        dma_channel_set_irq0_enabled(s_dmaChannel, false);  // Disable the IRQ for this channel
+        dma_channel_unclaim(s_dmaChannel);
+        s_dmaChannel = -1;
     }
 }
 
-static void BOOTY_deinitPIO() {
+static void deinitPIO(void) {
+    while(!pio_sm_is_tx_fifo_empty(c_pioBooty, c_smBooty)) {
+        tight_loop_contents();  // Wait for the TX FIFO to be empty
+    }
     pio_sm_set_enabled(c_pioBooty, c_smBooty, false);
-    pio_sm_restart(c_pioBooty, c_smBooty);
     pio_sm_clear_fifos(c_pioBooty, c_smBooty);
     pio_remove_program(c_pioBooty, &booty_program, s_offsetBooty);
-    // pio_remove_program_and_unclaim_sm(&booty_program, c_pioBooty, c_smBooty, s_offsetBooty);
 }
 
-static void BOOTY_dmaHandler() {
+static void dmaHandler(void) {
     // Disable the IRQ for this channel
-    dma_channel_set_irq0_enabled(BOOTY_dmaChannel, false);
+    dma_channel_set_irq0_enabled(s_dmaChannel, false);
     // Clear the interrupt flag
-    dma_hw->ints0 = 1u << BOOTY_dmaChannel;
+    dma_hw->ints0 = 1u << s_dmaChannel;
     BOOTY_transferComplete = true;
 }
 
-int BOOTY_initDMA(const volatile void *read_addr, const unsigned int transfer_count) {
+static int initDMA(const volatile void *read_addr, const unsigned int transfer_count) {
     const int channel = dma_claim_unused_channel(true);
     dma_channel_config dmaConfig = dma_channel_get_default_config(channel);
 
@@ -75,7 +78,7 @@ int BOOTY_initDMA(const volatile void *read_addr, const unsigned int transfer_co
     dma_channel_configure(channel, &dmaConfig, &c_pioBooty->txf[c_smBooty], read_addr, transfer_count, false);
     // Tell the DMA to raise IRQ line 0 when the channel finishes a block
     dma_channel_set_irq0_enabled(channel, true);
-    irq_set_exclusive_handler(DMA_IRQ_0, &BOOTY_dmaHandler);
+    irq_set_exclusive_handler(DMA_IRQ_0, &dmaHandler);
     dma_channel_start(channel);  // Start the DMA transfer
     // Enable the IRQ for this channel
     irq_set_enabled(DMA_IRQ_0, true);
@@ -83,7 +86,7 @@ int BOOTY_initDMA(const volatile void *read_addr, const unsigned int transfer_co
     return channel;
 }
 
-void BOOTY_initPIO(const PIO pio, const uint8_t sm, const uint8_t offset) {
+static void initPIO(const PIO pio, const uint8_t sm, const uint8_t offset) {
     pio_sm_config smConfig = booty_program_get_default_config(offset);
 
     // FIFO config
@@ -101,7 +104,7 @@ void BOOTY_initPIO(const PIO pio, const uint8_t sm, const uint8_t offset) {
     pio_sm_set_consecutive_pindirs(pio, sm, PIN_D0, 8, false);
     sm_config_set_out_pins(&smConfig, PIN_D0, 8);  // Set pins D0-D7 for the out(pins) instruction
     sm_config_set_set_pins(&smConfig, PIN_D0, 5);  // Set pin D0 to D5 for the set(pindirs) instruction
-    for (uint pin = PIN_D0; pin < PIN_D0 + 8; pin++) {
+    for (unsigned int pin = PIN_D0; pin < PIN_D0 + 8; pin++) {
         pio_gpio_init(pio, pin);
         gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
         gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_4MA);
@@ -114,7 +117,7 @@ void BOOTY_initPIO(const PIO pio, const uint8_t sm, const uint8_t offset) {
     pio_sm_init(pio, sm, offset, &smConfig);
 }
 
-int BOOTY_arm() {
+void BOOTY_arm(void) {
     const uint8_t *const c_payload = &c_payloadStart;
     const int c_payloadSize = &c_payloadEnd - &c_payloadStart;
 
@@ -123,9 +126,9 @@ int BOOTY_arm() {
     gpio_set_dir(PIN_RST, GPIO_IN);
 
     s_offsetBooty = pio_add_program(c_pioBooty, &booty_program);
-    BOOTY_initPIO(c_pioBooty, c_smBooty, s_offsetBooty);
+    initPIO(c_pioBooty, c_smBooty, s_offsetBooty);
 
-    BOOTY_dmaChannel = BOOTY_initDMA(c_payload, c_payloadSize);
+    s_dmaChannel = initDMA(c_payload, c_payloadSize);
 
     // Reset the console and start the payload out program
     gpio_set_dir(PIN_RST, GPIO_OUT);
