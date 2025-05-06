@@ -3,6 +3,7 @@
 
 
 ; Output data to pins from TX FIFO
+; USB -> PSX
 .program readdata
 .side_set 3 opt pindirs
 
@@ -12,30 +13,19 @@ idle:
     jmp pin idle                    ; jmp to idle if rd not asserted
     in pins, 1                      ; read the address pin
     mov y, isr                      ; Copy ISR to y so we can branch on address pin
-    jmp y-- idle                    ; Address pin is high, send data
-    pull noblock
-    out pins, 8
-    set pindirs, 0b11111 side 0b111 ; set 8 data pins to output
-    WAIT 1 GPIO GPIO_CS             ; Wait for CS to end
-    set pindirs, 0b00000 side 0b000 ; Set 8 data pins to input
-.wrap
+    jmp !y sendData                 ; Send status if address pin is low, otherwise send data
 
+;sendStatus:
+    in pins 9                       ; Read A0 + status pins
+    in null, 24                     ; Shift out everything but the status pins
+    mov pins, isr                   ; Finally, copy the value to the output pins
+    jmp outputWait                  ; Wait for CS to end
 
-; Monitor the RD signal, push status to pins or trigger data out
-.program readstatus
-.side_set 3 opt pindirs
+sendData:
+    pull noblock                    ; Pull data from the TX FIFO, but don't block if empty
+    out pins, 8                     ; Output the data to the pins
 
-idle:
-    mov isr, null                   ; Clear the ISR register
-    wait 0 GPIO GPIO_CS             ; wait for CS to assert low
-    jmp pin idle                    ; jmp to idle if rd not asserted
-    in pins, 1                      ; read the address pin
-    mov y, isr                      ; Copy ISR to y so we can branch on address pin
-    jmp !y idle                     ; Address pin is low,
-
-    in pins 9
-    in null, 24
-    mov pins, isr                   ; Copy the ISR register to the pins
+outputWait:
     set pindirs, 0b11111 side 0b111 ; set 8 data pins to output
     WAIT 1 GPIO GPIO_CS             ; Wait for CS to end
     set pindirs, 0b00000 side 0b000 ; Set 8 data pins to input
@@ -43,6 +33,7 @@ idle:
 
 
 ; Monitor the WR signal, push data to the RX FIFO
+; PSX -> USB
 .program writedata
 
 idle:

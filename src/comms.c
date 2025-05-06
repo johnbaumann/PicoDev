@@ -27,17 +27,15 @@ volatile uint32_t statusRegister = FT_STATUS_CONFIGURED | FT_STATUS_SPACE_AVAILA
 
 static const PIO pioInstance = pio0;
 
-static const unsigned int sm_readData = 0;
-static const unsigned int sm_readStatus = 1;
-static const unsigned int sm_writeData = 2;
+static const unsigned int sm_read = 0;
+static const unsigned int sm_write = 1;
 
 void COMMS_cpuFIFO(void);
 
 static void core1_entry(void);
 static void initGPIO(void);
-static void initProgramReadData(const PIO pio, const unsigned int sm, const unsigned int offset);
-static void initProgramReadStatus(const PIO pio, const unsigned int sm, const unsigned int offset);
-static void initProgramWriteData(const PIO pio, const unsigned int sm, const unsigned int offset);
+static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned int offset);
+static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void updateStatusRegister(void);
 
 static void core1_entry(void) {
@@ -50,37 +48,39 @@ static void core1_entry(void) {
 
 void COMMS_cpuFIFO(void) {
     unsigned int offsetReadData = pio_add_program(pioInstance, &readdata_program);
-    unsigned int offsetReadStatus = pio_add_program(pioInstance, &readstatus_program);
     unsigned int offsetWriteData = pio_add_program(pioInstance, &writedata_program);
 
     initGPIO();
 
-    initProgramReadStatus(pioInstance, sm_readStatus, offsetReadStatus);
-    initProgramReadData(pioInstance, sm_readData, offsetReadData);
-    initProgramWriteData(pioInstance, sm_writeData, offsetWriteData);
+    initProgramRead(pioInstance, sm_read, offsetReadData);
+    initProgramWrite(pioInstance, sm_write, offsetWriteData);
 
     multicore_launch_core1(core1_entry);
+
+    uint8_t datain[8];
+    uint8_t dataout[8];
 
     while (!g_resetPending) {
         tud_task();
 
+        const unsigned int tudAvailable = tud_cdc_n_available(0);
+
         // USB READ, USB RX -> PIO TX
-        if (!pio_sm_is_tx_fifo_full(pioInstance, sm_readData) && tud_cdc_n_available(0)) {
-            uint8_t datain[8];
-            unsigned int len = MIN(8 - pio_sm_get_tx_fifo_level(pioInstance, sm_readData), tud_cdc_n_available(0));
+        if (!pio_sm_is_tx_fifo_full(pioInstance, sm_read) && tudAvailable) {
+            const unsigned int len = 8 - pio_sm_get_tx_fifo_level(pioInstance, sm_read);
             const unsigned int count = tud_cdc_n_read(0, datain, len);
 
             for (unsigned int i = 0; i < count; i++) {
-                pioInstance->txf[sm_readData] = datain[i];
+                pioInstance->txf[sm_read] = datain[i];
             }
         }
 
         // USB WRITE, PIO RX -> USB TX
-        if (!pio_sm_is_rx_fifo_empty(pioInstance, sm_writeData)) {
-            unsigned int len = pio_sm_get_rx_fifo_level(pioInstance, sm_writeData);
-            uint8_t dataout[8];
+        if (!pio_sm_is_rx_fifo_empty(pioInstance, sm_write)) {
+            const unsigned int len = pio_sm_get_rx_fifo_level(pioInstance, sm_write);
+
             for (unsigned int i = 0; i < len; i++) {
-                dataout[i] = pioInstance->rxf[sm_writeData];
+                dataout[i] = pioInstance->rxf[sm_write];
             }
 
             // Data gets discarded if the USB is not connected
@@ -95,11 +95,9 @@ void COMMS_cpuFIFO(void) {
         tight_loop_contents();  // Wait for core1 to finish
     }
 
-    pio_sm_set_enabled(pioInstance, sm_readStatus, false);
-    pio_sm_set_enabled(pioInstance, sm_readData, false);
-    pio_sm_set_enabled(pioInstance, sm_writeData, false);
+    pio_sm_set_enabled(pioInstance, sm_read, false);
+    pio_sm_set_enabled(pioInstance, sm_write, false);
     pio_remove_program(pioInstance, &readdata_program, offsetReadData);
-    pio_remove_program(pioInstance, &readstatus_program, offsetReadStatus);
     pio_remove_program(pioInstance, &writedata_program, offsetWriteData);
 
     multicore_reset_core1();
@@ -130,14 +128,14 @@ static void initGPIO(void) {
     }
 }
 
-static void initProgramReadData(const PIO pio, const unsigned int sm, const unsigned int offset) {
+static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned int offset) {
     pio_sm_config c = readdata_program_get_default_config(offset);
 
     sm_config_set_out_pins(&c, PIN_D0, 8);
     sm_config_set_out_shift(&c, true, false, 8);
 
     sm_config_set_in_pins(&c, PIN_A0);
-    sm_config_set_in_pin_count(&c, 1);  // In pin A0
+    sm_config_set_in_pin_count(&c, 9);  // In pins A0, STATUS_D0 to STATUS_D7
     sm_config_set_in_shift(&c, true, false, 1);
     sm_config_set_jmp_pin(&c, PIN_RD);
 
@@ -150,25 +148,7 @@ static void initProgramReadData(const PIO pio, const unsigned int sm, const unsi
     pio_sm_set_enabled(pio, sm, true);
 }
 
-static void initProgramReadStatus(const PIO pio, const unsigned int sm, const unsigned int offset) {
-    pio_sm_config c = readstatus_program_get_default_config(offset);
-
-    pio_sm_set_consecutive_pindirs(pio, sm, PIN_D0, 8, false);  // Set the data pins to input
-    sm_config_set_in_pins(&c, PIN_A0);
-    sm_config_set_in_pin_count(&c, 9);  // In pins A0, STATUS_D0 to STATUS_D7
-    sm_config_set_in_shift(&c, true, false, 1);
-    sm_config_set_out_pins(&c, PIN_D0, 8);
-    sm_config_set_jmp_pin(&c, PIN_RD);
-
-    sm_config_set_set_pins(&c, PIN_D0, 5);         // Set pin D0 to D5 for the set(pindirs) instruction
-    sm_config_set_sideset(&c, 3 + 1, true, true);  // 3 bits sideset + 1 bit for SIDE_EN(optional sideset)
-    sm_config_set_sideset_pin_base(&c, PIN_D5);    // Set the base pin for the sideset to D5
-
-    pio_sm_init(pio, sm, offset, &c);
-    pio_sm_set_enabled(pio, sm, true);
-}
-
-static void initProgramWriteData(const PIO pio, const unsigned int sm, const unsigned int offset) {
+static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigned int offset) {
     pio_sm_config c = writedata_program_get_default_config(offset);
 
     pio_sm_set_consecutive_pindirs(pio, sm, PIN_D0, 8, false);  // Set the pin direction to input
@@ -183,8 +163,8 @@ static void initProgramWriteData(const PIO pio, const unsigned int sm, const uns
 }
 
 static inline void updateStatusRegister(void) {
-    const bool dataAvailable = (pioInstance->fstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + sm_readData))) == 0;
-    const bool spaceAvailable = (pioInstance->fstat & (1u << (PIO_FSTAT_RXFULL_LSB + sm_writeData))) == 0;
+    const bool dataAvailable = (pioInstance->fstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + sm_read))) == 0;
+    const bool spaceAvailable = (pioInstance->fstat & (1u << (PIO_FSTAT_RXFULL_LSB + sm_write))) == 0;
 
     statusRegister = FT_STATUS_CONFIGURED | (spaceAvailable << 1) | (dataAvailable << 0);
 
