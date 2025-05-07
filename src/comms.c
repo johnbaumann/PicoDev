@@ -104,27 +104,36 @@ void COMMS_cpuFIFO(void) {
 }
 
 static void initGPIO(void) {
+    static const unsigned int controlPins[] = {
+        PIN_CS,
+        PIN_RD,
+        PIN_WR,
+        PIN_A0,
+    };
+
     // Internal status data pins
     for (unsigned int pin = STATUS_D0; pin <= STATUS_D7; pin++) {
         gpio_init(pin);
         gpio_set_dir(pin, GPIO_OUT);
+        gpio_set_pulls(pin, true, true);
+        gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
     }
 
     // Data pins
     for (unsigned int pin = PIN_D0; pin <= PIN_D7; pin++) {
         pio_gpio_init(pioInstance, pin);
         gpio_set_pulls(pin, false, false);
-        gpio_set_input_enabled(pin, false);
+        gpio_set_input_enabled(pin, true);
         gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
         gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_4MA);
     }
 
     // Control pins
-    for (unsigned int pin = PIN_RD; pin <= PIN_A0; pin++) {
-        pio_gpio_init(pioInstance, pin);
-        gpio_set_pulls(pin, false, false);
-        gpio_set_input_enabled(pin, true);
-        gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
+    for (unsigned int pin = 0; pin < (sizeof(controlPins) / sizeof(controlPins[0])); pin++) {
+        pio_gpio_init(pioInstance, controlPins[pin]);
+        gpio_set_pulls(controlPins[pin], false, false);
+        gpio_set_input_enabled(controlPins[pin], true);
+        gpio_set_slew_rate(controlPins[pin], GPIO_SLEW_RATE_FAST);
     }
 }
 
