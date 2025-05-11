@@ -37,6 +37,7 @@ pico_sdk_init()
 
 add_executable(PicoDev
     src/booty.c
+    src/circularbuffer.c
     src/comms.c
     src/payload.s
     src/PicoDev.c
