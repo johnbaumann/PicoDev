@@ -16,7 +16,7 @@ void CircularBuffer_deinit(CircularBuffer *cb) {
 }
 
 void CircularBuffer_init(CircularBuffer *cb, unsigned size) {
-    cb->buffer = (uint8_t *)malloc(size);
+    cb->buffer = (uint8_t *)malloc(size + 1);
     assert(cb->buffer != NULL);  // Bonk
     cb->size = size + 1;
     cb->head = 0;
