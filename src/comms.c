@@ -4,17 +4,13 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <tusb.h>
 
 #include "PicoDev.h"
 #include "comms.pio.h"
-#include "hardware/clocks.h"
-#include "hardware/dma.h"
 #include "hardware/pio.h"
 #include "pico/multicore.h"
 #include "pico/platform.h"
-#include "pico/stdlib.h"
 
 #define FT_STATUS_DATA_AVAILABLE 0x01   // RXF
 #define FT_STATUS_SPACE_AVAILABLE 0x02  // TXE

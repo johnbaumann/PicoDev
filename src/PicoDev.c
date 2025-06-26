@@ -1,16 +1,12 @@
 #include "PicoDev.h"
 
-#include <stdio.h>
 #include <tusb.h>
 
 #include "booty.h"
 #include "comms.h"
 #include "hardware/clocks.h"
-#include "hardware/dma.h"
-#include "hardware/pio.h"
-#include "hardware/uart.h"
+#include "hardware/gpio.h"
 #include "hardware/vreg.h"
-#include "pico/stdlib.h"
 
 volatile bool g_resetPending = false;
 static uint32_t s_lastLowEvent = 0;
