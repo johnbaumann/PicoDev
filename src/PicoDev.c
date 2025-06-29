@@ -18,7 +18,8 @@ static void resetCallback(unsigned int gpio, uint32_t events);
 
 static void acknowledgeReset(void) {
     while (gpio_get(PIN_RST) == 0) {
-        tight_loop_contents();  // Wait for the reset pin to go high
+        // Wait for the reset pin to go high
+        tud_task();  // Process USB tasks to avoid blocking
     }
 
     g_resetPending = false;
@@ -54,7 +55,7 @@ int main(void) {
                 gpio_set_irq_enabled_with_callback(PIN_RST, GPIO_IRQ_LEVEL_LOW, true, &resetCallback);
 
                 while (!BOOTY_transferComplete && !g_resetPending) {
-                    tight_loop_contents();
+                    tud_task();
                 }
 
                 sleep_ms(50);    // De-init is happening too fast, so we need to wait a bit. Fix this later

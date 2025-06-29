@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <tusb.h>
 
 #include "PicoDev.h"
 #include "booty.pio.h"
@@ -136,6 +137,6 @@ void BOOTY_arm(void) {
     gpio_set_dir(PIN_RST, GPIO_IN);
 
     while (gpio_get(PIN_RST) == 0) {
-        sleep_ms(1);  // Wait for the reset pin to go high
+        tud_task();
     }
 }
