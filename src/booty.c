@@ -138,5 +138,6 @@ void BOOTY_arm(void) {
 
     while (gpio_get(PIN_RST) == 0) {
         tud_task();
+        sleep_ms(1);  // Yield CPU cycles to prevent saturation
     }
 }
