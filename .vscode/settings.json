@@ -11,6 +11,8 @@
             "statusBarVisibility": "hidden"
         }
     },
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "cmake.copyCompileCommands": "${workspaceFolder}/build/compile_commands.json",
     "cmake.configureOnEdit": false,
     "cmake.automaticReconfigure": false,
     "cmake.configureOnOpen": false,

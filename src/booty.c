@@ -1,16 +1,14 @@
 #include "booty.h"
 
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <tusb.h>
 
 #include "PicoDev.h"
 #include "booty.pio.h"
-#include "hardware/clocks.h"
 #include "hardware/dma.h"
 #include "hardware/pio.h"
-#include "pico/stdlib.h"
 #include "pico/time.h"
 
 extern const uint8_t c_payloadStart, c_payloadEnd;
@@ -33,7 +31,7 @@ static void deinitPIO(void);
 
 void BOOTY_deinit(void) {
     deinitDMA();
-    deinitPIO();    
+    deinitPIO();
 }
 
 static void deinitDMA(void) {
@@ -47,7 +45,7 @@ static void deinitDMA(void) {
 }
 
 static void deinitPIO(void) {
-    while(!pio_sm_is_tx_fifo_empty(c_pioBooty, c_smBooty)) {
+    while (!pio_sm_is_tx_fifo_empty(c_pioBooty, c_smBooty)) {
         tight_loop_contents();  // Wait for the TX FIFO to be empty
     }
     pio_sm_set_enabled(c_pioBooty, c_smBooty, false);
@@ -139,6 +137,7 @@ void BOOTY_arm(void) {
     gpio_set_dir(PIN_RST, GPIO_IN);
 
     while (gpio_get(PIN_RST) == 0) {
-        sleep_ms(1);  // Wait for the reset pin to go high
+        tud_task();
+        sleep_ms(1);  // Yield CPU cycles to prevent saturation
     }
 }
