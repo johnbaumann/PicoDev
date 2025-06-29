@@ -14,8 +14,8 @@
 
 #define FT_STATUS_DATA_AVAILABLE 0x01   // RXF
 #define FT_STATUS_SPACE_AVAILABLE 0x02  // TXE
-// #define FT_STATUS_SUSPEND 0x04         // SUSP
-#define FT_STATUS_CONFIGURED 0x08  // CONFIG
+#define FT_STATUS_SUSPEND 0x04          // SUSP
+#define FT_STATUS_CONFIGURED 0x08       // CONFIG
 
 volatile bool core1Running = false;
 
@@ -26,15 +26,13 @@ static const PIO pioInstance = pio0;
 static const unsigned int sm_read = 0;
 static const unsigned int sm_write = 1;
 
-void COMMS_cpuFIFO(void);
-
 static void core1_entry(void);
 static void initGPIO(void);
 static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void updateStatusRegister(void);
 
-static void core1_entry(void) {
+static void __no_inline_not_in_flash_func(core1_entry)(void) {
     core1Running = true;
     while (!g_resetPending) {
         updateStatusRegister();
@@ -42,7 +40,7 @@ static void core1_entry(void) {
     core1Running = false;
 }
 
-void COMMS_cpuFIFO(void) {
+void __no_inline_not_in_flash_func(COMMS_cpuFIFO)(void) {
     unsigned int offsetReadData = pio_add_program(pioInstance, &readdata_program);
     unsigned int offsetWriteData = pio_add_program(pioInstance, &writedata_program);
 
