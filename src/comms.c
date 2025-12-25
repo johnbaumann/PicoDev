@@ -19,8 +19,6 @@
 
 volatile bool core1Running = false;
 
-volatile uint32_t statusRegister = FT_STATUS_CONFIGURED | FT_STATUS_SPACE_AVAILABLE;
-
 static const PIO pioInstance = pio0;
 
 static const unsigned int sm_read = 0;
@@ -166,11 +164,12 @@ static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigne
 }
 
 static inline void updateStatusRegister(void) {
-    const bool dataAvailable = (pioInstance->fstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + sm_read))) == 0;
-    const bool spaceAvailable = (pioInstance->fstat & (1u << (PIO_FSTAT_RXFULL_LSB + sm_write))) == 0;
+    const uint32_t notFstat = ~pioInstance->fstat;
+    const bool dataAvailable = (notFstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + sm_read)));
+    const bool spaceAvailable = (notFstat & (1u << (PIO_FSTAT_RXFULL_LSB + sm_write)));
+    const uint32_t statusRegister = (FT_STATUS_CONFIGURED | (spaceAvailable << 1u) | (dataAvailable << 0u))
+                                    << STATUS_D0;
+    const uint32_t pinMask = 0xFFu << STATUS_D0;
 
-    statusRegister = FT_STATUS_CONFIGURED | (spaceAvailable << 1) | (dataAvailable << 0);
-
-    gpio_put_masked(0xFF << STATUS_D0,
-                    statusRegister << STATUS_D0);  // Set the status pins to the status register value
+    gpio_put_masked(pinMask, statusRegister);  // Set the status pins to the status register value
 }
