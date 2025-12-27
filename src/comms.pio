@@ -1,4 +1,5 @@
 .define GPIO_CS     1
+.define GPIO_RD     12
 .define GPIO_WR     13
 
 
@@ -27,7 +28,7 @@ sendData:
 
 outputWait:
     set pindirs, 0b11111 side 0b111 ; set 8 data pins to output
-    WAIT 1 GPIO GPIO_CS             ; Wait for CS to end
+    WAIT 1 GPIO GPIO_RD             ; Wait for CS to end
     set pindirs, 0b00000 side 0b000 ; Set 8 data pins to input
 .wrap
 
