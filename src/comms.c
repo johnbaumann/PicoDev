@@ -61,7 +61,7 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
         // USB READ, USB RX -> PIO TX
         if (!pio_sm_is_tx_fifo_full(s_pioInstance, s_smRead) && tud_cdc_n_available(0)) {
             const unsigned int len = 8 - pio_sm_get_tx_fifo_level(s_pioInstance, s_smRead);
-            const unsigned int count = tud_cdc_n_read(0, datain, len);
+            tud_cdc_n_read(0, datain, len);
 
             for (unsigned int i = 0; i < count; i++) {
                 s_pioInstance->txf[s_smRead] = datain[i];
@@ -72,7 +72,6 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
 
         // USB WRITE, PIO RX -> USB TX
         if (!pio_sm_is_rx_fifo_empty(s_pioInstance, s_smWrite)) {
-            const uint32_t prevSpaceAvailable = (s_pioInstance->fstat & (1u << (PIO_FSTAT_RXFULL_LSB + s_smWrite)));
             const unsigned int len = pio_sm_get_rx_fifo_level(s_pioInstance, s_smWrite);
 
             for (unsigned int i = 0; i < len; i++) {
@@ -81,7 +80,7 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
 
             // Data gets discarded if the USB is not connected
             if (tud_cdc_n_connected(0)) {
-                uint32_t count = tud_cdc_n_write(0, dataout, len);
+                tud_cdc_n_write(0, dataout, len);
                 tud_cdc_n_write_flush(0);
             }
 
