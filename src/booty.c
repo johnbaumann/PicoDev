@@ -13,26 +13,18 @@
 
 extern const uint8_t c_payloadStart, c_payloadEnd;
 
-void BOOTY_deinit(void);
-
-static int initDMA(const volatile void *read_addr, const unsigned int transfer_count);
-static void initPIO(const PIO pio, const uint8_t sm, const uint8_t offset);
-
 volatile bool BOOTY_transferComplete = false;
 
 static PIO const c_pioBooty = pio0;
 static const unsigned int c_smBooty = 0;
 static unsigned int s_offsetBooty = 0;
-
 static int s_dmaChannel = -1;
 
 static void deinitDMA(void);
 static void deinitPIO(void);
-
-void BOOTY_deinit(void) {
-    deinitDMA();
-    deinitPIO();
-}
+static void dmaHandler(void);
+static int initDMA(const volatile void *read_addr, const unsigned int transfer_count);
+static void initPIO(const PIO pio, const uint8_t sm, const uint8_t offset);
 
 static void deinitDMA(void) {
     if (s_dmaChannel >= 0) {
@@ -40,6 +32,7 @@ static void deinitDMA(void) {
         dma_channel_cleanup(s_dmaChannel);
         dma_channel_set_irq0_enabled(s_dmaChannel, false);  // Disable the IRQ for this channel
         dma_channel_unclaim(s_dmaChannel);
+        irq_remove_handler(DMA_IRQ_0, &dmaHandler);
         s_dmaChannel = -1;
     }
 }
@@ -140,4 +133,9 @@ void BOOTY_arm(void) {
         tud_task();
         sleep_ms(1);  // Yield CPU cycles to prevent saturation
     }
+}
+
+void BOOTY_deinit(void) {
+    deinitDMA();
+    deinitPIO();
 }

@@ -1,4 +1,5 @@
 .define GPIO_CS     1
+.define GPIO_RD     12
 .define GPIO_WR     13
 
 
@@ -6,6 +7,8 @@
 ; USB -> PSX
 .program readdata
 .side_set 3 opt pindirs
+    set x 0x0A                      ; Set X/status as configured + space available
+.wrap_target
 
 idle:
     mov isr, null                   ; Clear the ISR register
@@ -16,18 +19,18 @@ idle:
     jmp !y sendData                 ; Send status if address pin is low, otherwise send data
 
 ;sendStatus:
-    in pins 9                       ; Read A0 + status pins
-    in null, 24                     ; Shift out everything but the status pins
-    mov pins, isr                   ; Finally, copy the value to the output pins
+    wait 0 irq 0                    ; Wait for C code to set status in X
+    mov pins, x                     ; Output the status register
     jmp outputWait                  ; Wait for CS to end
 
 sendData:
     pull noblock                    ; Pull data from the TX FIFO, but don't block if empty
     out pins, 8                     ; Output the data to the pins
+    irq nowait 0
 
 outputWait:
     set pindirs, 0b11111 side 0b111 ; set 8 data pins to output
-    WAIT 1 GPIO GPIO_CS             ; Wait for CS to end
+    wait 1 GPIO GPIO_RD             ; Wait for RD to end
     set pindirs, 0b00000 side 0b000 ; Set 8 data pins to input
 .wrap
 
@@ -43,4 +46,5 @@ idle:
 ;writestall:
     wait 1 GPIO GPIO_WR             ; Wait for WR to finish
     in pins, 8                      ; read 8 bits from data pins
+    irq nowait 0
 .wrap
