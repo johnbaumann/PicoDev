@@ -29,6 +29,8 @@ static void initGPIO(void);
 static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void updateStatusRegister(void);
+static void usbReadToPIO(void);
+static void usbWriteFromPIO(void);
 
 static void __time_critical_func(core1_entry)(void) {
     s_core1Running = true;
@@ -52,40 +54,11 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
 
     multicore_launch_core1(core1_entry);
 
-    uint8_t datain[8];
-    uint8_t dataout[8];
-
     while (!g_resetPending) {
         tud_task();
 
-        // USB READ, USB RX -> PIO TX
-        if (!pio_sm_is_tx_fifo_full(s_pioInstance, s_smRead) && tud_cdc_n_available(0)) {
-            const unsigned int len = 8 - pio_sm_get_tx_fifo_level(s_pioInstance, s_smRead);
-            tud_cdc_n_read(0, datain, len);
-
-            for (unsigned int i = 0; i < count; i++) {
-                s_pioInstance->txf[s_smRead] = datain[i];
-            }
-
-            s_pioInstance->irq_force = (1u << 0);  // Force an interrupt to update the status register
-        }
-
-        // USB WRITE, PIO RX -> USB TX
-        if (!pio_sm_is_rx_fifo_empty(s_pioInstance, s_smWrite)) {
-            const unsigned int len = pio_sm_get_rx_fifo_level(s_pioInstance, s_smWrite);
-
-            for (unsigned int i = 0; i < len; i++) {
-                dataout[i] = s_pioInstance->rxf[s_smWrite];
-            }
-
-            // Data gets discarded if the USB is not connected
-            if (tud_cdc_n_connected(0)) {
-                tud_cdc_n_write(0, dataout, len);
-                tud_cdc_n_write_flush(0);
-            }
-
-            s_pioInstance->irq_force = (1u << 0);  // Force an interrupt to update the status register
-        }
+        usbReadToPIO();
+        usbWriteFromPIO();
     }
 
     while (s_core1Running) {
@@ -169,4 +142,39 @@ static inline void updateStatusRegister(void) {
     const uint32_t statusRegister = (FT_STATUS_CONFIGURED | (spaceAvailable << 1u) | (dataAvailable << 0u));
 
     pio_sm_exec(s_pioInstance, s_smRead, pio_encode_set(pio_x, statusRegister));
+}
+
+static inline void usbReadToPIO(void) {
+    uint8_t buffer[8];
+    // USB READ, USB RX -> PIO TX
+    if (!pio_sm_is_tx_fifo_full(s_pioInstance, s_smRead) && tud_cdc_n_available(0)) {
+        const unsigned int len = 8 - pio_sm_get_tx_fifo_level(s_pioInstance, s_smRead);
+        const unsigned int count = tud_cdc_n_read(0, buffer, len);
+
+        for (unsigned int i = 0; i < count; i++) {
+            s_pioInstance->txf[s_smRead] = buffer[i];
+        }
+
+        s_pioInstance->irq_force = (1u << 0);  // Force an interrupt to update the status register
+    }
+}
+
+static inline void usbWriteFromPIO(void) {
+    uint8_t buffer[8];
+    // USB WRITE, PIO RX -> USB TX
+    if (!pio_sm_is_rx_fifo_empty(s_pioInstance, s_smWrite)) {
+        const unsigned int len = pio_sm_get_rx_fifo_level(s_pioInstance, s_smWrite);
+
+        for (unsigned int i = 0; i < len; i++) {
+            buffer[i] = s_pioInstance->rxf[s_smWrite];
+        }
+
+        // Data gets discarded if the USB is not connected
+        if (tud_cdc_n_connected(0)) {
+            tud_cdc_n_write(0, buffer, len);
+            tud_cdc_n_write_flush(0);
+        }
+
+        s_pioInstance->irq_force = (1u << 0);  // Force an interrupt to update the status register
+    }
 }
