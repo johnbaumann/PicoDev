@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <tusb.h>
 
-#include "PicoDev.h"
+#include "picodev.h"
 #include "comms.pio.h"
 #include "hardware/pio.h"
 #include "pico/multicore.h"

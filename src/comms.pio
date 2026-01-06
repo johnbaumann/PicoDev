@@ -9,9 +9,9 @@
 .side_set 3 opt pindirs
     set x 0x0A                      ; Set X/status as configured + space available
 .wrap_target
+    mov isr, null                   ; Clear the ISR register
 
 idle:
-    mov isr, null                   ; Clear the ISR register
     wait 0 GPIO GPIO_CS             ; wait for CS to assert low
     jmp pin idle                    ; jmp to idle if rd not asserted
     in pins, 1                      ; read the address pin

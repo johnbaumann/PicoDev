@@ -5,7 +5,7 @@
 #include <string.h>
 #include <tusb.h>
 
-#include "PicoDev.h"
+#include "picodev.h"
 #include "booty.pio.h"
 #include "hardware/dma.h"
 #include "hardware/pio.h"
