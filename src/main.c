@@ -4,9 +4,7 @@
 
 #include "booty.h"
 #include "comms.h"
-#include "hardware/clocks.h"
 #include "hardware/gpio.h"
-#include "hardware/vreg.h"
 
 volatile bool g_resetPending = false;
 static uint32_t s_lastLowEvent = 0;
@@ -28,11 +26,6 @@ static void acknowledgeReset(void) {
 }
 
 int main(void) {
-    vreg_set_voltage(VREG_VOLTAGE_1_15);  // Set the voltage regulator to 1.15V
-    sleep_ms(100);                        // Wait for the voltage regulator to stabilize
-    set_sys_clock_khz(271200, true);
-    sleep_ms(100);  // Wait for the system clock to stabilize
-
     // Initialize reset pin
     gpio_init(PIN_RST);
 

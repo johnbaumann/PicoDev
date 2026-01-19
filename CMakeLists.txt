@@ -43,14 +43,14 @@ add_executable(PicoDev
     src/usb-descriptors.c
 )
 
-# Set CPU frequency to 271.2MHz
+# Set CPU frequency to 264MHz
 # Borrowed from the PicoROM project - thanks!
 target_compile_definitions(PicoDev PRIVATE
         PLL_SYS_REFDIV=1
-        PLL_SYS_VCO_FREQ_HZ=1356000000
-        PLL_SYS_POSTDIV1=5
+        PLL_SYS_VCO_FREQ_HZ=1584000000
+        PLL_SYS_POSTDIV1=6
         PLL_SYS_POSTDIV2=1
-        SYS_CLK_HZ=271200000
+        SYS_CLK_HZ=264000000
 )
 
 pico_set_program_name(PicoDev "PicoDev")

@@ -2,10 +2,12 @@
 
 #include "comms.h"
 
+#include <hardware/regs/pio.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <tusb.h>
 
+#include "PicoDev.h"
 #include "class/cdc/cdc_device.h"
 #include "comms.pio.h"
 #include "device/usbd.h"
@@ -103,9 +105,8 @@ static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned
     sm_config_set_out_shift(&c, true, false, 8);
 
     sm_config_set_in_pins(&c, PIN_A0);
-    sm_config_set_in_pin_count(&c, 1);  // In pins A0
-    // (RP2040 cannot mask input pins, so in_count is ignored and set to 32 here)
-    // If we could mask input pins, we could do: mov y, pins and save 2 instructions in the read program
+    // sm_config_set_in_pin_count(&c, 1);  // In pins A0
+    //(RP2040 cannot mask input pins, so in_count is ignored and set to 32 here)
     sm_config_set_in_shift(&c, true, false, 0);
     sm_config_set_jmp_pin(&c, PIN_RD);
 
@@ -123,7 +124,8 @@ static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigne
 
     pio_sm_set_consecutive_pindirs(pio, sm, PIN_D0, 8, false);  // Set the pin direction to input
     sm_config_set_in_pins(&c, PIN_D0);
-    sm_config_set_in_pin_count(&c, 8);  // Set the number of input pins to 8
+    // sm_config_set_in_pin_count(&c, 8);  // Set the number of input pins to 8
+    //(RP2040 cannot mask input pins, so in_count is ignored and set to 32 here)
     sm_config_set_jmp_pin(&c, PIN_WR);
     sm_config_set_in_shift(&c, false, true, 8);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
@@ -157,7 +159,7 @@ static inline void usbReadToPIO(void) {
             const unsigned int count = tud_cdc_n_read(0, buffer, len);
 
             for (unsigned int i = 0; i < count; i++) {
-                s_pioInstance->txf[s_smRead] = buffer[i];
+                pio_sm_put(s_pioInstance, s_smRead, buffer[i]);
             }
         }
     }
@@ -171,7 +173,7 @@ static inline void usbWriteFromPIO(void) {
 
         if (len <= tud_cdc_n_write_available(0)) {
             for (unsigned int i = 0; i < len; i++) {
-                buffer[i] = s_pioInstance->rxf[s_smWrite];
+                buffer[i] = pio_sm_get(s_pioInstance, s_smWrite);
             }
 
             // Data gets discarded if the USB is not connected

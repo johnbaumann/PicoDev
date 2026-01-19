@@ -63,7 +63,7 @@ static int initDMA(const volatile void *read_addr, const unsigned int transfer_c
     channel_config_set_transfer_data_size(&dmaConfig, DMA_SIZE_8);
     channel_config_set_high_priority(&dmaConfig, true);
 
-    const unsigned int parallelDREQ = c_pioBooty == pio0 ? DREQ_PIO0_TX0 : DREQ_PIO1_TX0;
+    const unsigned int parallelDREQ = pio_get_dreq(c_pioBooty, c_smBooty, true);
     channel_config_set_dreq(&dmaConfig, parallelDREQ);
 
     dma_channel_configure(channel, &dmaConfig, &c_pioBooty->txf[c_smBooty], read_addr, transfer_count, false);
