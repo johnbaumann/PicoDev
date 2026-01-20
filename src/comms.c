@@ -13,7 +13,6 @@
 #include <string.h>
 #include <tusb.h>
 
-#include "PicoDev.h"
 #include "comms.pio.h"
 #include "picodev.h"
 
@@ -31,7 +30,6 @@ static void statusIRQHandler(void);
 static void updateStatusRegister(void);
 static void usbRead(void);
 static void usbWrite(void);
-
 
 static void __time_critical_func(core1_entry)(void) {
     s_core1Running = true;

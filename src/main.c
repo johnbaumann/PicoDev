@@ -1,10 +1,9 @@
-#include "PicoDev.h"
-
+#include <hardware/gpio.h>
 #include <tusb.h>
 
 #include "booty.h"
 #include "comms.h"
-#include "hardware/gpio.h"
+#include "picodev.h"
 
 volatile bool g_resetPending = false;
 static uint32_t s_lastLowEvent = 0;

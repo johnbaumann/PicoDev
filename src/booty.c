@@ -1,15 +1,15 @@
 #include "booty.h"
 
+#include <hardware/dma.h>
+#include <hardware/pio.h>
+#include <pico/time.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <tusb.h>
 
-#include "picodev.h"
 #include "booty.pio.h"
-#include "hardware/dma.h"
-#include "hardware/pio.h"
-#include "pico/time.h"
+#include "picodev.h"
 
 extern const uint8_t c_payloadStart, c_payloadEnd;
 
