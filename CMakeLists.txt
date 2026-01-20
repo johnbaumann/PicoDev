@@ -51,6 +51,8 @@ target_compile_definitions(PicoDev PRIVATE
         PLL_SYS_POSTDIV1=5
         PLL_SYS_POSTDIV2=1
         SYS_CLK_HZ=276000000
+        SYS_CLK_VREG_VOLTAGE_AUTO_ADJUST=1
+        SYS_CLK_VREG_VOLTAGE_MIN=VREG_VOLTAGE_1_30
 )
 
 pico_set_program_name(PicoDev "PicoDev")
