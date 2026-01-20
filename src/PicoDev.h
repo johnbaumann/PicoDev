@@ -16,6 +16,16 @@ enum Pin {
     PIN_RD = 12u,
     PIN_WR = 13u,
     PIN_A0 = 14u,
+    // The pins below are not physical connections
+    // These are used for internal purposes only
+    STATUS_D0 = 15u,
+    STATUS_D1 = 16u,
+    STATUS_D2 = 17u,
+    STATUS_D3 = 18u,
+    STATUS_D4 = 19u,
+    STATUS_D5 = 20u,
+    STATUS_D6 = 21u,
+    STATUS_D7 = 22u,
 };
 
 // To-do: Move this to the main file later

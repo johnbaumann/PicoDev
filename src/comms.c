@@ -35,10 +35,7 @@ static void __time_critical_func(core1_entry)(void) {
     s_core1Running = true;
 
     while (!g_resetPending) {
-        if (pio_interrupt_get(s_pioInstance, 0)) {
-            updateStatusRegister();
-            pio_interrupt_clear(s_pioInstance, 0);  // Clear the interrupt request
-        }
+        updateStatusRegister();
     }
 
     s_core1Running = false;
@@ -82,6 +79,14 @@ static void initGPIO(void) {
         PIN_A0,
     };
 
+    // Internal status data pins
+    for (unsigned int pin = STATUS_D0; pin <= STATUS_D7; pin++) {
+        gpio_init(pin);
+        gpio_set_dir(pin, GPIO_OUT);
+        gpio_set_pulls(pin, true, true);
+        gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
+    }
+
     // Data pins
     for (unsigned int pin = PIN_D0; pin <= PIN_D7; pin++) {
         pio_gpio_init(s_pioInstance, pin);
@@ -107,7 +112,7 @@ static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned
     sm_config_set_out_shift(&c, true, false, 8);
 
     sm_config_set_in_pins(&c, PIN_A0);
-    // sm_config_set_in_pin_count(&c, 1);  // In pins A0
+    // sm_config_set_in_pin_count(&c, 9);  // In pins A0
     //(RP2040 cannot mask input pins, so in_count is ignored and set to 32 here)
     sm_config_set_in_shift(&c, true, false, 0);
     sm_config_set_jmp_pin(&c, PIN_RD);
@@ -136,11 +141,6 @@ static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigne
     pio_sm_set_enabled(pio, sm, true);
 }
 
-static void __time_critical_func(statusIRQHandler)(void) {
-    updateStatusRegister();
-    pio_interrupt_clear(s_pioInstance, 0);  // Clear the interrupt request
-}
-
 static inline void updateStatusRegister(void) {
     // Status register format:
     // Bit 0: Data Available (RXF)
@@ -152,9 +152,10 @@ static inline void updateStatusRegister(void) {
     const uint32_t notFstat = ~s_pioInstance->fstat;
     const bool dataAvailable = (notFstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + s_smRead)));
     const bool spaceAvailable = (notFstat & (1u << (PIO_FSTAT_RXFULL_LSB + s_smWrite)));
-    const uint32_t statusRegister = ((deviceConfigured << 3u) | (spaceAvailable << 1u) | (dataAvailable << 0u));
+    const uint32_t statusRegister = ((deviceConfigured << 3u) | (spaceAvailable << 1u) | (dataAvailable << 0u)) << STATUS_D0;
 
-    pio_sm_exec(s_pioInstance, s_smRead, pio_encode_set(pio_pins, statusRegister));
+    const uint32_t pinMask = 0xFFu << STATUS_D0;
+    gpio_put_masked(pinMask, statusRegister);  // Set the status pins to the status register value
 }
 
 static inline void usbRead(void) {

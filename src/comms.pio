@@ -17,7 +17,9 @@ idle:
     jmp !y sendData                 ; Send status if address pin is low, otherwise send data
 
 ;sendStatus:
-    irq wait 0                      ; Trigger interrupt to update status register. C code will do: set pins, status
+    in pins 9                       ; Read A0 + status pins
+    in null, 24                     ; Shift out everything but the status pins
+    mov pins, isr                   ; Finally, copy the value to the output pins
     jmp outputWait
 
 sendData:
