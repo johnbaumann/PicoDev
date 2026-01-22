@@ -18,14 +18,14 @@ enum Pin {
     PIN_A0 = 14u,
     // The pins below are not physical connections
     // These are used for internal purposes only
-    STATUS_D0 = 15u,
-    STATUS_D1 = 16u,
-    STATUS_D2 = 17u,
-    STATUS_D3 = 18u,
-    STATUS_D4 = 19u,
-    STATUS_D5 = 20u,
-    STATUS_D6 = 21u,
-    STATUS_D7 = 22u,
+    STATUS_D0 = 17u,
+    STATUS_D1 = 18u,
+    STATUS_D2 = 19u,
+    STATUS_D3 = 20u,
+    STATUS_D4 = 21u,
+    STATUS_D5 = 22u,
+    STATUS_D6 = 23u,
+    STATUS_D7 = 24u,
 };
 
 // To-do: Move this to the main file later
