@@ -152,7 +152,8 @@ static inline void updateStatusRegister(void) {
     const uint32_t notFstat = ~s_pioInstance->fstat;
     const bool dataAvailable = (notFstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + s_smRead)));
     const bool spaceAvailable = (notFstat & (1u << (PIO_FSTAT_RXFULL_LSB + s_smWrite)));
-    const uint32_t statusRegister = ((deviceConfigured << 3u) | (spaceAvailable << 1u) | (dataAvailable << 0u)) << STATUS_D0;
+    const uint32_t statusRegister = ((deviceConfigured << 3u) | (spaceAvailable << 1u) | (dataAvailable << 0u))
+                                    << STATUS_D0;
 
     const uint32_t pinMask = 0xFFu << STATUS_D0;
     gpio_put_masked(pinMask, statusRegister);  // Set the status pins to the status register value
@@ -177,9 +178,10 @@ static inline void usbWrite(void) {
     uint8_t buffer[8];
     // USB WRITE, PIO RX -> USB TX
     if (!pio_sm_is_rx_fifo_empty(s_pioInstance, s_smWrite)) {
-        const unsigned int len = pio_sm_get_rx_fifo_level(s_pioInstance, s_smWrite);
+        unsigned int len = pio_sm_get_rx_fifo_level(s_pioInstance, s_smWrite);
+        len = MIN(len, tud_cdc_n_write_available(0));
 
-        if (len <= tud_cdc_n_write_available(0)) {
+        if (len) {
             for (unsigned int i = 0; i < len; i++) {
                 buffer[i] = pio_sm_get(s_pioInstance, s_smWrite);
             }
