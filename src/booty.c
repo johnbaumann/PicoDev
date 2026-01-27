@@ -1,7 +1,9 @@
 #include "booty.h"
 
 #include <hardware/dma.h>
+#include <hardware/gpio.h>
 #include <hardware/pio.h>
+#include <pico/platform/common.h>
 #include <pico/time.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -38,7 +40,7 @@ static void deinitDMA(void) {
 }
 
 static void deinitPIO(void) {
-    while (!pio_sm_is_tx_fifo_empty(c_pioBooty, c_smBooty)) {
+    while (!pio_sm_is_tx_fifo_empty(c_pioBooty, c_smBooty) && !gpio_get(PIN_CS)) {
         tight_loop_contents();  // Wait for the TX FIFO to be empty
     }
     pio_sm_set_enabled(c_pioBooty, c_smBooty, false);
@@ -50,7 +52,7 @@ static void dmaHandler(void) {
     // Disable the IRQ for this channel
     dma_channel_set_irq0_enabled(s_dmaChannel, false);
     // Clear the interrupt flag
-    dma_hw->ints0 = 1u << s_dmaChannel;
+    dma_channel_acknowledge_irq0(s_dmaChannel);
     BOOTY_transferComplete = true;
 }
 
@@ -131,7 +133,6 @@ void BOOTY_arm(void) {
 
     while (gpio_get(PIN_RST) == 0) {
         tud_task();
-        sleep_ms(1);  // Yield CPU cycles to prevent saturation
     }
 }
 
