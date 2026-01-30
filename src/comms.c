@@ -14,17 +14,21 @@
 #include <tusb.h>
 
 #include "comms.pio.h"
+#include "hardware/dma.h"
 #include "picodev.h"
 
 static volatile bool s_core1Running = false;
+static volatile unsigned int s_statusRegister = 0x0a;
 
 static const PIO s_pioInstance = pio0;
 static const unsigned int s_smRead = 0;
 static const unsigned int s_smWrite = 1;
+static const unsigned int s_smStatus = 2;
 
 static void core1_entry(void);
 static void initGPIO(void);
 static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned int offset);
+static void initProgramStatus(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void statusIRQHandler(void);
 static void updateStatusRegister(void);
@@ -44,13 +48,37 @@ static void __time_critical_func(core1_entry)(void) {
 void __time_critical_func(COMMS_cpuFIFO)(void) {
     unsigned int offsetReadData = pio_add_program(s_pioInstance, &readdata_program);
     unsigned int offsetWriteData = pio_add_program(s_pioInstance, &writedata_program);
+    unsigned int offsetStatus = pio_add_program(s_pioInstance, &statusreg_program);
 
     initGPIO();
 
     initProgramRead(s_pioInstance, s_smRead, offsetReadData);
     initProgramWrite(s_pioInstance, s_smWrite, offsetWriteData);
+    initProgramStatus(s_pioInstance, s_smStatus, offsetStatus);
 
     multicore_launch_core1(core1_entry);
+
+    const int pingChan = dma_claim_unused_channel(true);
+    const int pongChan = dma_claim_unused_channel(true);
+
+    dma_channel_config pingCfg = dma_channel_get_default_config(pingChan);
+    dma_channel_config pongCfg = dma_channel_get_default_config(pongChan);
+
+    channel_config_set_transfer_data_size(&pingCfg, DMA_SIZE_8);
+    channel_config_set_read_increment(&pingCfg, false);
+    channel_config_set_write_increment(&pingCfg, false);
+    channel_config_set_dreq(&pingCfg, pio_get_dreq(s_pioInstance, s_smStatus, true));
+    channel_config_set_chain_to(&pingCfg, pongChan);
+    dma_channel_configure(pingChan, &pingCfg, &s_pioInstance->txf[s_smStatus], &s_statusRegister, 1, false);
+
+    channel_config_set_transfer_data_size(&pongCfg, DMA_SIZE_8);
+    channel_config_set_read_increment(&pongCfg, false);
+    channel_config_set_write_increment(&pongCfg, false);
+    channel_config_set_dreq(&pongCfg, pio_get_dreq(s_pioInstance, s_smStatus, true));
+    channel_config_set_chain_to(&pongCfg, pingChan);
+    dma_channel_configure(pongChan, &pongCfg, &s_pioInstance->txf[s_smStatus], &s_statusRegister, 1, false);
+
+    dma_channel_start(pingChan);
 
     while (!g_resetPending) {
         tud_task();
@@ -63,10 +91,19 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
         tight_loop_contents();  // Wait for core1 to finish
     }
 
+    channel_config_set_chain_to(&pingCfg, pingChan);  // Point chain to at self to stop transfer loop
+    channel_config_set_chain_to(&pongCfg, pongChan);
+    dma_channel_cleanup(pingChan);
+    dma_channel_cleanup(pongChan);
+    dma_channel_unclaim(pingChan);
+    dma_channel_unclaim(pongChan);
+
     pio_sm_set_enabled(s_pioInstance, s_smRead, false);
     pio_sm_set_enabled(s_pioInstance, s_smWrite, false);
+    pio_sm_set_enabled(s_pioInstance, s_smStatus, false);
     pio_remove_program(s_pioInstance, &readdata_program, offsetReadData);
     pio_remove_program(s_pioInstance, &writedata_program, offsetWriteData);
+    pio_remove_program(s_pioInstance, &statusreg_program, offsetStatus);
 
     multicore_reset_core1();
 }
@@ -81,8 +118,7 @@ static void initGPIO(void) {
 
     // Internal status data pins
     for (unsigned int pin = STATUS_D0; pin <= STATUS_D7; pin++) {
-        gpio_init(pin);
-        gpio_set_dir(pin, GPIO_OUT);
+        pio_gpio_init(s_pioInstance, pin);
         gpio_set_pulls(pin, true, true);
         gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
     }
@@ -126,6 +162,17 @@ static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned
     pio_sm_set_enabled(pio, sm, true);
 }
 
+static void initProgramStatus(const PIO pio, const unsigned int sm, const unsigned int offset) {
+    pio_sm_config c = statusreg_program_get_default_config(offset);
+
+    pio_sm_set_consecutive_pindirs(pio, sm, STATUS_D0, 8, true);
+    sm_config_set_out_pins(&c, STATUS_D0, 8);
+    sm_config_set_out_shift(&c, true, true, 8);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
 static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigned int offset) {
     pio_sm_config c = writedata_program_get_default_config(offset);
 
@@ -152,11 +199,8 @@ static inline void updateStatusRegister(void) {
     const uint32_t notFstat = ~s_pioInstance->fstat;
     const bool dataAvailable = (notFstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + s_smRead)));
     const bool spaceAvailable = (notFstat & (1u << (PIO_FSTAT_RXFULL_LSB + s_smWrite)));
-    const uint32_t statusRegister = ((deviceConfigured << 3u) | (spaceAvailable << 1u) | (dataAvailable << 0u))
-                                    << STATUS_D0;
 
-    const uint32_t pinMask = 0xFFu << STATUS_D0;
-    gpio_put_masked(pinMask, statusRegister);  // Set the status pins to the status register value
+    s_statusRegister = ((deviceConfigured << 3u) | (spaceAvailable << 1u) | (dataAvailable << 0u));
 }
 
 static inline void usbRead(void) {

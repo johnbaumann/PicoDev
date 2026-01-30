@@ -45,3 +45,7 @@ idle:
     wait 1 GPIO GPIO_WR             ; Wait for WR to finish
     in pins, 8                      ; read 8 bits from data pins
 .wrap
+
+.program statusreg
+    out pins, 8
+.wrap
