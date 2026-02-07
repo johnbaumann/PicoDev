@@ -33,6 +33,14 @@ outputWait:
 .wrap
 
 
+; Status program
+; Constantly pushes DMA status byte to the status pins
+; The status pins are used by the read program as a hacky status register
+.program statusreg
+    out pins, 8
+.wrap
+
+
 ; Monitor the WR signal, push data to the RX FIFO
 ; PSX -> USB
 .program writedata
@@ -44,8 +52,4 @@ idle:
 ;writestall:
     wait 1 GPIO GPIO_WR             ; Wait for WR to finish
     in pins, 8                      ; read 8 bits from data pins
-.wrap
-
-.program statusreg
-    out pins, 8
 .wrap
