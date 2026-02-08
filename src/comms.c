@@ -111,7 +111,7 @@ static statusChannels initDMA(void) {
     channel_config_set_irq_quiet(&dmaConfig, false);
     channel_config_set_enable(&dmaConfig, true);
     channel_config_set_sniff_enable(&dmaConfig, false);
-    channel_config_set_high_priority( &dmaConfig, false);
+    channel_config_set_high_priority(&dmaConfig, false);
 
     // Channel A
     channel_config_set_chain_to(&dmaConfig, channels.channelB);
@@ -178,8 +178,6 @@ static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned
     sm_config_set_out_shift(&c, true, false, 8);
 
     sm_config_set_in_pins(&c, PIN_A0);
-    // sm_config_set_in_pin_count(&c, 9);  // In pins A0
-    //(RP2040 cannot mask input pins, so in_count is ignored and set to 32 here)
     sm_config_set_in_shift(&c, true, false, 0);
     sm_config_set_jmp_pin(&c, PIN_RD);
 
@@ -234,7 +232,7 @@ static inline void updateStatusRegister(void) {
 }
 
 static inline void usbRead(void) {
-    uint8_t buffer[8];
+    static uint8_t buffer[8];
     // USB READ, USB RX -> PIO TX
     if (tud_cdc_n_available(0)) {
         if (!pio_sm_is_tx_fifo_full(s_pioInstance, s_smRead)) {
@@ -249,7 +247,7 @@ static inline void usbRead(void) {
 }
 
 static inline void usbWrite(void) {
-    uint8_t buffer[8];
+    static uint8_t buffer[8];
     // USB WRITE, PIO RX -> USB TX
     if (!pio_sm_is_rx_fifo_empty(s_pioInstance, s_smWrite)) {
         unsigned int len = pio_sm_get_rx_fifo_level(s_pioInstance, s_smWrite);
