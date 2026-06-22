@@ -17,16 +17,14 @@ extern const uint8_t c_payloadStart, c_payloadEnd;
 
 volatile bool BOOTY_transferComplete = false;
 
-static PIO const c_pioBooty = pio0;
-static const unsigned int c_smBooty = 0;
-static unsigned int s_offsetBooty = 0;
 static int s_dmaChannel = -1;
 
 static void deinitDMA(void);
-static void deinitPIO(void);
 static void dmaHandler(void);
-static int initDMA(const volatile void *read_addr, const unsigned int transfer_count);
-static void initPIO(const PIO pio, const uint8_t sm, const uint8_t offset);
+static int initDMA(const volatile void *readAddr, const unsigned int transferCount);
+static void initProgramBooty(const PIO pio, const unsigned int sm, const unsigned int offset);
+
+static StateMachine s_smBooty = {.pio = pio0, .sm = 0, .init = initProgramBooty, .program = &booty_program};
 
 static void deinitDMA(void) {
     if (s_dmaChannel >= 0) {
@@ -37,15 +35,6 @@ static void deinitDMA(void) {
         irq_remove_handler(DMA_IRQ_0, &dmaHandler);
         s_dmaChannel = -1;
     }
-}
-
-static void deinitPIO(void) {
-    while (!pio_sm_is_tx_fifo_empty(c_pioBooty, c_smBooty) && !gpio_get(PIN_CS)) {
-        tight_loop_contents();  // Wait for the TX FIFO to be empty
-    }
-    pio_sm_set_enabled(c_pioBooty, c_smBooty, false);
-    pio_sm_clear_fifos(c_pioBooty, c_smBooty);
-    pio_remove_program(c_pioBooty, &booty_program, s_offsetBooty);
 }
 
 static void dmaHandler(void) {
@@ -65,10 +54,10 @@ static int initDMA(const volatile void *read_addr, const unsigned int transfer_c
     channel_config_set_transfer_data_size(&dmaConfig, DMA_SIZE_8);
     channel_config_set_high_priority(&dmaConfig, true);
 
-    const unsigned int parallelDREQ = pio_get_dreq(c_pioBooty, c_smBooty, true);
+    const unsigned int parallelDREQ = pio_get_dreq(s_smBooty.pio, s_smBooty.sm, true);
     channel_config_set_dreq(&dmaConfig, parallelDREQ);
 
-    dma_channel_configure(channel, &dmaConfig, &c_pioBooty->txf[c_smBooty], read_addr, transfer_count, false);
+    dma_channel_configure(channel, &dmaConfig, &s_smBooty.pio->txf[s_smBooty.sm], read_addr, transfer_count, false);
     // Tell the DMA to raise IRQ line 0 when the channel finishes a block
     dma_channel_set_irq0_enabled(channel, true);
     irq_set_exclusive_handler(DMA_IRQ_0, &dmaHandler);
@@ -79,7 +68,7 @@ static int initDMA(const volatile void *read_addr, const unsigned int transfer_c
     return channel;
 }
 
-static void initPIO(const PIO pio, const uint8_t sm, const uint8_t offset) {
+static void initProgramBooty(const PIO pio, const unsigned int sm, const unsigned int offset) {
     pio_sm_config smConfig = booty_program_get_default_config(offset);
 
     // FIFO config
@@ -96,7 +85,7 @@ static void initPIO(const PIO pio, const uint8_t sm, const uint8_t offset) {
     // Data
     pio_sm_set_consecutive_pindirs(pio, sm, PIN_D0, 8, false);
     sm_config_set_out_pins(&smConfig, PIN_D0, 8);  // Set pins D0-D7 for the out(pins) instruction
-    sm_config_set_set_pins(&smConfig, PIN_D0, 5);  // Set pin D0 to D5 for the set(pindirs) instruction
+    sm_config_set_set_pins(&smConfig, PIN_D0, 5);  // Set pin D0 to D4 for the set(pindirs) instruction
     for (unsigned int pin = PIN_D0; pin < PIN_D0 + 8; pin++) {
         pio_gpio_init(pio, pin);
         gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
@@ -118,8 +107,7 @@ void BOOTY_arm(void) {
 
     gpio_set_dir(PIN_RST, GPIO_IN);
 
-    s_offsetBooty = pio_add_program(c_pioBooty, &booty_program);
-    initPIO(c_pioBooty, c_smBooty, s_offsetBooty);
+    initStateMachine(&s_smBooty);
 
     s_dmaChannel = initDMA(c_payload, c_payloadSize);
 
@@ -127,7 +115,7 @@ void BOOTY_arm(void) {
     gpio_set_dir(PIN_RST, GPIO_OUT);
     gpio_put(PIN_RST, 0);
 
-    pio_sm_set_enabled(c_pioBooty, c_smBooty, true);
+    pio_sm_set_enabled(s_smBooty.pio, s_smBooty.sm, true);
     sleep_ms(250);  // Wait a bit for the console to reset
     gpio_set_dir(PIN_RST, GPIO_IN);
 
@@ -138,5 +126,8 @@ void BOOTY_arm(void) {
 
 void BOOTY_deinit(void) {
     deinitDMA();
-    deinitPIO();
+    while (!pio_sm_is_tx_fifo_empty(s_smBooty.pio, s_smBooty.sm) && !gpio_get(PIN_CS)) {
+        tight_loop_contents();  // Wait for the TX FIFO to be empty
+    }
+    deinitStateMachine(&s_smBooty);
 }

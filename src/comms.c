@@ -7,8 +7,8 @@
 #include <hardware/regs/pio.h>
 #include <pico/multicore.h>
 #include <pico/platform.h>
-#include <pico/platform/common.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 #include <tusb.h>
@@ -17,30 +17,23 @@
 #include "hardware/dma.h"
 #include "picodev.h"
 
-typedef struct {
-    int readProgramOffset;
-    int statusProgramOffset;
-    int writeProgramOffset;
-} programOffsets;
+// Pico-SDK doesn't seem to declare this properly?
+// Needed for time_critical attribute
+#ifndef __STRING
+#define __STRING(x) #x
+#endif
 
 typedef struct {
     int channelA;
     int channelB;
-} statusChannels;
+} StatusDMAChannels;
 
 static volatile unsigned int s_statusRegister = 0x0a;
 
-static const PIO s_pioInstance = pio0;
-static const unsigned int s_smRead = 0;
-static const unsigned int s_smStatus = 1;
-static const unsigned int s_smWrite = 2;
-
 static void core1_entry(void);
-static void deinitDMA(const statusChannels *channels);
-static void deinitPIO(const programOffsets *offsets);
-static statusChannels initDMA(void);
+static void deinitStatusDMA(const StatusDMAChannels *channels);
+static StatusDMAChannels initStatusDMA(void);
 static void initGPIO(void);
-static programOffsets initPIO(void);
 static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void initProgramStatus(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigned int offset);
@@ -48,6 +41,12 @@ static void statusIRQHandler(void);
 static void updateStatusRegister(void);
 static void usbRead(void);
 static void usbWrite(void);
+
+static StateMachine s_smRead = {.pio = pio0, .sm = 0, .init = initProgramRead, .program = &readdata_program};
+static StateMachine s_smStatus = {.pio = pio0, .sm = 1, .init = initProgramStatus, .program = &statusreg_program};
+static StateMachine s_smWrite = {.pio = pio0, .sm = 2, .init = initProgramWrite, .program = &writedata_program};
+static StateMachine *const s_sm[] = {&s_smRead, &s_smStatus, &s_smWrite};
+static const size_t c_smCount = sizeof(s_sm) / sizeof(StateMachine *);
 
 static void __time_critical_func(core1_entry)(void) {
     while (!g_resetPending) {
@@ -58,11 +57,12 @@ static void __time_critical_func(core1_entry)(void) {
 void __time_critical_func(COMMS_cpuFIFO)(void) {
     initGPIO();
 
-    const programOffsets offsets = initPIO();
-
+    for (int i = 0; i < c_smCount; i++) {
+        initStateMachine(s_sm[i]);
+    }
     multicore_launch_core1(core1_entry);
 
-    const statusChannels channels = initDMA();
+    const StatusDMAChannels channels = initStatusDMA();
 
     while (!g_resetPending) {
         tud_task();
@@ -71,40 +71,31 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
         usbWrite();
     }
 
-    deinitDMA(&channels);
-    deinitPIO(&offsets);
+    deinitStatusDMA(&channels);
 
+    for (int i = 0; i < c_smCount; i++) {
+        deinitStateMachine(s_sm[i]);
+    }
     multicore_reset_core1();
 }
 
-static void deinitDMA(const statusChannels *channels) {
+static void deinitStatusDMA(const StatusDMAChannels *channels) {
     dma_channel_cleanup(channels->channelA);
     dma_channel_cleanup(channels->channelB);
     dma_channel_unclaim(channels->channelA);
     dma_channel_unclaim(channels->channelB);
 }
 
-static void deinitPIO(const programOffsets *offsets) {
-    pio_sm_set_enabled(s_pioInstance, s_smRead, false);
-    pio_sm_set_enabled(s_pioInstance, s_smStatus, false);
-    pio_sm_set_enabled(s_pioInstance, s_smWrite, false);
-    pio_remove_program(s_pioInstance, &readdata_program, offsets->readProgramOffset);
-    pio_remove_program(s_pioInstance, &statusreg_program, offsets->statusProgramOffset);
-    pio_remove_program(s_pioInstance, &writedata_program, offsets->writeProgramOffset);
-}
-
-static statusChannels initDMA(void) {
-    statusChannels channels;
-
-    channels.channelA = dma_claim_unused_channel(true);
-    channels.channelB = dma_claim_unused_channel(true);
+static StatusDMAChannels initStatusDMA(void) {
+    const StatusDMAChannels channels = {.channelA = dma_claim_unused_channel(true),
+                                        .channelB = dma_claim_unused_channel(true)};
 
     dma_channel_config dmaConfig = {0};
 
     // Shared channel settings
     channel_config_set_read_increment(&dmaConfig, false);
     channel_config_set_write_increment(&dmaConfig, false);
-    channel_config_set_dreq(&dmaConfig, pio_get_dreq(s_pioInstance, s_smStatus, true));
+    channel_config_set_dreq(&dmaConfig, pio_get_dreq(s_smStatus.pio, s_smStatus.sm, true));
     channel_config_set_transfer_data_size(&dmaConfig, DMA_SIZE_8);
     channel_config_set_ring(&dmaConfig, false, 0);
     channel_config_set_bswap(&dmaConfig, false);
@@ -115,11 +106,13 @@ static statusChannels initDMA(void) {
 
     // Channel A
     channel_config_set_chain_to(&dmaConfig, channels.channelB);
-    dma_channel_configure(channels.channelA, &dmaConfig, &s_pioInstance->txf[s_smStatus], &s_statusRegister, 1, false);
+    dma_channel_configure(channels.channelA, &dmaConfig, &s_smStatus.pio->txf[s_smStatus.sm], &s_statusRegister, 1,
+                          false);
 
     // Channel B
     channel_config_set_chain_to(&dmaConfig, channels.channelA);
-    dma_channel_configure(channels.channelB, &dmaConfig, &s_pioInstance->txf[s_smStatus], &s_statusRegister, 1, true);
+    dma_channel_configure(channels.channelB, &dmaConfig, &s_smStatus.pio->txf[s_smStatus.sm], &s_statusRegister, 1,
+                          true);
 
     return channels;
 }
@@ -132,47 +125,26 @@ static void initGPIO(void) {
         PIN_A0,
     };
 
-    // Internal status data pins
-    for (unsigned int pin = STATUS_D0; pin <= STATUS_D7; pin++) {
-        pio_gpio_init(s_pioInstance, pin);
-        gpio_set_pulls(pin, true, true);
-        gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
-    }
-
-    // Data pins
-    for (unsigned int pin = PIN_D0; pin <= PIN_D7; pin++) {
-        pio_gpio_init(s_pioInstance, pin);
-        gpio_set_pulls(pin, false, false);
-        gpio_set_input_enabled(pin, true);
-        gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
-        gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_4MA);
-    }
-
     // Control pins
     for (unsigned int pin = 0; pin < (sizeof(controlPins) / sizeof(controlPins[0])); pin++) {
-        pio_gpio_init(s_pioInstance, controlPins[pin]);
+        gpio_init(controlPins[pin]);
         gpio_set_pulls(controlPins[pin], false, false);
         gpio_set_input_enabled(controlPins[pin], true);
         gpio_set_slew_rate(controlPins[pin], GPIO_SLEW_RATE_FAST);
     }
 }
 
-static programOffsets initPIO(void) {
-    programOffsets offsets;
-
-    offsets.readProgramOffset = pio_add_program(s_pioInstance, &readdata_program);
-    offsets.statusProgramOffset = pio_add_program(s_pioInstance, &statusreg_program);
-    offsets.writeProgramOffset = pio_add_program(s_pioInstance, &writedata_program);
-
-    initProgramRead(s_pioInstance, s_smRead, offsets.readProgramOffset);
-    initProgramStatus(s_pioInstance, s_smStatus, offsets.statusProgramOffset);
-    initProgramWrite(s_pioInstance, s_smWrite, offsets.writeProgramOffset);
-
-    return offsets;
-}
-
 static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned int offset) {
     pio_sm_config c = readdata_program_get_default_config(offset);
+
+    // Data pins
+    for (unsigned int pin = PIN_D0; pin <= PIN_D7; pin++) {
+        pio_gpio_init(pio, pin);
+        gpio_set_pulls(pin, false, false);
+        gpio_set_input_enabled(pin, true);
+        gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
+        gpio_set_drive_strength(pin, GPIO_DRIVE_STRENGTH_4MA);
+    }
 
     sm_config_set_out_pins(&c, PIN_D0, 8);
     sm_config_set_out_shift(&c, true, false, 8);
@@ -192,6 +164,13 @@ static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned
 
 static void initProgramStatus(const PIO pio, const unsigned int sm, const unsigned int offset) {
     pio_sm_config c = statusreg_program_get_default_config(offset);
+
+    // Internal status data pins
+    for (unsigned int pin = STATUS_D0; pin <= STATUS_D7; pin++) {
+        pio_gpio_init(pio, pin);
+        gpio_set_pulls(pin, true, true);
+        gpio_set_slew_rate(pin, GPIO_SLEW_RATE_FAST);
+    }
 
     pio_sm_set_consecutive_pindirs(pio, sm, STATUS_D0, 8, true);
     sm_config_set_out_pins(&c, STATUS_D0, 8);
@@ -224,9 +203,10 @@ static inline void updateStatusRegister(void) {
     // Bit 3: Configured
 
     static const bool deviceConfigured = true;
-    const uint32_t notFstat = ~s_pioInstance->fstat;
-    const bool dataAvailable = (notFstat & (1u << (PIO_FSTAT_TXEMPTY_LSB + s_smRead)));
-    const bool spaceAvailable = (notFstat & (1u << (PIO_FSTAT_RXFULL_LSB + s_smWrite)));
+    const uint32_t notFstatRead = ~s_smRead.pio->fstat;
+    const uint32_t notFstatWrite = ~s_smWrite.pio->fstat;
+    const bool dataAvailable = (notFstatRead & (1u << (PIO_FSTAT_TXEMPTY_LSB + s_smRead.sm)));
+    const bool spaceAvailable = (notFstatWrite & (1u << (PIO_FSTAT_RXFULL_LSB + s_smWrite.sm)));
 
     s_statusRegister = ((deviceConfigured << 3u) | (spaceAvailable << 1u) | (dataAvailable << 0u));
 }
@@ -235,12 +215,12 @@ static inline void usbRead(void) {
     static uint8_t buffer[8];
     // USB READ, USB RX -> PIO TX
     if (tud_cdc_n_available(0)) {
-        if (!pio_sm_is_tx_fifo_full(s_pioInstance, s_smRead)) {
-            const unsigned int len = 8 - pio_sm_get_tx_fifo_level(s_pioInstance, s_smRead);
+        if (!pio_sm_is_tx_fifo_full(s_smRead.pio, s_smRead.sm)) {
+            const unsigned int len = 8 - pio_sm_get_tx_fifo_level(s_smRead.pio, s_smRead.sm);
             const unsigned int count = tud_cdc_n_read(0, buffer, len);
 
             for (unsigned int i = 0; i < count; i++) {
-                pio_sm_put(s_pioInstance, s_smRead, buffer[i]);
+                pio_sm_put(s_smRead.pio, s_smRead.sm, buffer[i]);
             }
         }
     }
@@ -249,13 +229,13 @@ static inline void usbRead(void) {
 static inline void usbWrite(void) {
     static uint8_t buffer[8];
     // USB WRITE, PIO RX -> USB TX
-    if (!pio_sm_is_rx_fifo_empty(s_pioInstance, s_smWrite)) {
-        unsigned int len = pio_sm_get_rx_fifo_level(s_pioInstance, s_smWrite);
+    if (!pio_sm_is_rx_fifo_empty(s_smWrite.pio, s_smWrite.sm)) {
+        unsigned int len = pio_sm_get_rx_fifo_level(s_smWrite.pio, s_smWrite.sm);
         len = MIN(len, tud_cdc_n_write_available(0));
 
         if (len) {
             for (unsigned int i = 0; i < len; i++) {
-                buffer[i] = pio_sm_get(s_pioInstance, s_smWrite);
+                buffer[i] = pio_sm_get(s_smWrite.pio, s_smWrite.sm);
             }
 
             // Data gets discarded if the USB is not connected

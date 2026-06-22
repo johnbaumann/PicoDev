@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hardware/pio.h>
 #include <stdbool.h>
 
 enum Pin {
@@ -27,6 +28,17 @@ enum Pin {
     STATUS_D6 = 23u,
     STATUS_D7 = 24u,
 };
+
+typedef struct {
+    void (*const init)(const PIO, const unsigned int, const unsigned int);  // pio, sm, offset
+    unsigned int offset;
+    const unsigned int sm;
+    const PIO pio;
+    const struct pio_program *const program;
+} StateMachine;
+
+void deinitStateMachine(const StateMachine *stateMachine);
+void initStateMachine(StateMachine *stateMachine);
 
 // To-do: Move this to the main file later
 extern volatile bool g_resetPending;
