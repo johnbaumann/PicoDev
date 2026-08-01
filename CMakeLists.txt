@@ -41,19 +41,21 @@ add_executable(PicoDev
     src/main.c
     src/payload.s
     src/picodev.c
-    src/usb-descriptors.c
+    #src/usb-descriptors.c
 )
 
 # Set CPU frequency to 276MHz at boot
 # python vcocalc.py 276 --cmake
 target_compile_definitions(PicoDev PRIVATE
+        PICO_FLASH_SPI_CLKDIV=4
         PLL_SYS_REFDIV=1
-        PLL_SYS_VCO_FREQ_HZ=1380000000
+        PLL_SYS_VCO_FREQ_HZ=1356000000
         PLL_SYS_POSTDIV1=5
         PLL_SYS_POSTDIV2=1
-        SYS_CLK_HZ=276000000
+        SYS_CLK_HZ=271200000
         SYS_CLK_VREG_VOLTAGE_AUTO_ADJUST=1
         SYS_CLK_VREG_VOLTAGE_MIN=VREG_VOLTAGE_1_30
+        PICO_XOSC_STARTUP_DELAY_MULTIPLIER=64
 )
 
 pico_set_program_name(PicoDev "PicoDev")
@@ -63,6 +65,7 @@ pico_set_program_version(PicoDev "0.1")
 pico_generate_pio_header(PicoDev
     ${CMAKE_CURRENT_LIST_DIR}/src/booty.pio
     ${CMAKE_CURRENT_LIST_DIR}/src/comms.pio
+    ${CMAKE_CURRENT_LIST_DIR}/src/uart.pio
 )
 
 # Modify the below lines to enable/disable output over UART/USB
@@ -78,7 +81,7 @@ target_link_libraries(PicoDev
 target_include_directories(PicoDev PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
         ./src
-        ${PICO_TINYUSB_PATH}/src
+        #${PICO_TINYUSB_PATH}/src
 )
 
 # Add any user requested libraries
@@ -87,7 +90,7 @@ target_link_libraries(PicoDev
         hardware_pio
         pico_multicore
         pico_unique_id
-        tinyusb_device
+        #tinyusb_device
 )
 
 pico_add_extra_outputs(PicoDev)

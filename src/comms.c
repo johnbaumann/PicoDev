@@ -2,20 +2,27 @@
 
 #include "comms.h"
 
+#include <hardware/clocks.h>
+#include <hardware/dma.h>
 #include <hardware/irq.h>
 #include <hardware/pio.h>
 #include <hardware/regs/pio.h>
+#include <hardware/structs/pio.h>
+#include <hardware/structs/uart.h>
+#include <hardware/uart.h>
 #include <pico/multicore.h>
 #include <pico/platform.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <tusb.h>
 
+// #include <tusb.h>
+
+#include "circularbuffer.h"
 #include "comms.pio.h"
-#include "hardware/dma.h"
 #include "picodev.h"
+#include "uart.pio.h"
 
 // Pico-SDK doesn't seem to declare this properly?
 // Needed for time_critical attribute
@@ -34,19 +41,36 @@ static void core1_entry(void);
 static void deinitStatusDMA(const StatusDMAChannels *channels);
 static StatusDMAChannels initStatusDMA(void);
 static void initGPIO(void);
+
 static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void initProgramStatus(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigned int offset);
+static void initProgramUARTRX(const PIO pio, const unsigned int sm, const unsigned int offset);
+static void initProgramUARTTX(const PIO pio, const unsigned int sm, const unsigned int offset);
+
+static void pioRead(void);
+static void pioWrite(void);
 static void statusIRQHandler(void);
 static void updateStatusRegister(void);
+static void uartRead(void);
+static void uartWrite(void);
 static void usbRead(void);
 static void usbWrite(void);
 
 static StateMachine s_smRead = {.pio = pio0, .sm = 0, .init = initProgramRead, .program = &readdata_program};
 static StateMachine s_smStatus = {.pio = pio0, .sm = 1, .init = initProgramStatus, .program = &statusreg_program};
 static StateMachine s_smWrite = {.pio = pio0, .sm = 2, .init = initProgramWrite, .program = &writedata_program};
-static StateMachine *const s_sm[] = {&s_smRead, &s_smStatus, &s_smWrite};
+
+static StateMachine s_smUARTRX = {.pio = pio1, .sm = 0, .init = initProgramUARTRX, .program = &uart_rx_program};
+static StateMachine s_smUARTTX = {.pio = pio1, .sm = 1, .init = initProgramUARTTX, .program = &uart_tx_program};
+
+static StateMachine *const s_sm[] = {&s_smRead, &s_smStatus, &s_smWrite, &s_smUARTRX, &s_smUARTTX};
 static const size_t c_smCount = sizeof(s_sm) / sizeof(StateMachine *);
+
+static CircularBuffer s_cbRead;
+static CircularBuffer s_cbWrite;
+
+static const unsigned int c_UARTBaud = 510000;
 
 static void __time_critical_func(core1_entry)(void) {
     while (!g_resetPending) {
@@ -64,12 +88,23 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
 
     const StatusDMAChannels channels = initStatusDMA();
 
-    while (!g_resetPending) {
-        tud_task();
+    CircularBuffer_init(&s_cbRead, 4096);
+    CircularBuffer_init(&s_cbWrite, 4096);
 
-        usbRead();
-        usbWrite();
+    while (!g_resetPending) {
+        // tud_task();
+
+        // usbRead();
+        // usbWrite();
+        pioRead();
+        pioWrite();
+
+        uartRead();
+        uartWrite();
     }
+
+    CircularBuffer_deinit(&s_cbRead);
+    CircularBuffer_deinit(&s_cbWrite);
 
     deinitStatusDMA(&channels);
 
@@ -195,6 +230,43 @@ static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigne
     pio_sm_set_enabled(pio, sm, true);
 }
 
+static void initProgramUARTRX(const PIO pio, const unsigned int sm, const unsigned int offset) {
+    pio_sm_set_consecutive_pindirs(pio, sm, PIN_UARTRX, 1, false);
+    gpio_pull_up(PIN_UARTRX);
+    pio_gpio_init(pio, PIN_UARTRX);
+
+    pio_sm_config c = uart_rx_program_get_default_config(offset);
+    sm_config_set_in_pins(&c, PIN_UARTRX);  // for WAIT, IN
+    sm_config_set_jmp_pin(&c, PIN_UARTRX);  // for JMP
+    sm_config_set_in_shift(&c, true, false, 32);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+    float div = (float)clock_get_hz(clk_sys) / (8 * c_UARTBaud);
+    sm_config_set_clkdiv(&c, div);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+static void initProgramUARTTX(const PIO pio, const unsigned int sm, const unsigned int offset) {
+    pio_sm_set_pins(pio, sm, 1ull << PIN_UARTTX);
+    pio_sm_set_consecutive_pindirs(pio, sm, PIN_UARTTX, 1, true);
+    pio_gpio_init(pio, PIN_UARTTX);
+
+    pio_sm_config c = uart_tx_program_get_default_config(offset);
+
+    sm_config_set_out_shift(&c, true, false, 32);
+    sm_config_set_out_pins(&c, PIN_UARTTX, 1);
+    sm_config_set_sideset_pins(&c, PIN_UARTTX);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+
+    float div = (float)clock_get_hz(clk_sys) / (8 * c_UARTBaud);
+    sm_config_set_clkdiv(&c, div);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
 static inline void updateStatusRegister(void) {
     // Status register format:
     // Bit 0: Data Available (RXF)
@@ -211,7 +283,55 @@ static inline void updateStatusRegister(void) {
     s_statusRegister = ((deviceConfigured << 3u) | (spaceAvailable << 1u) | (dataAvailable << 0u));
 }
 
-static inline void usbRead(void) {
+// UART RX -> Buffer
+static void uartRead(void) {
+    unsigned int len = pio_sm_get_rx_fifo_level(s_smUARTRX.pio, s_smUARTRX.sm);
+    if (len) {
+        const unsigned int spaceAvailable = CircularBuffer_unused(&s_cbRead);
+        len = MIN(len, spaceAvailable);
+        for (unsigned int i = 0; i < len; i++) {
+            CircularBuffer_put(&s_cbRead, *((uint8_t *)s_smUARTRX.pio->rxf + 3));
+        }
+    }
+}
+
+// Buffer -> USB TX
+static void uartWrite(void) {
+    unsigned int len = CircularBuffer_count(&s_cbWrite);
+    if (len) {
+        const unsigned int spaceAvailable = 8 - pio_sm_get_tx_fifo_level(s_smUARTTX.pio, s_smUARTTX.sm);
+        len = MIN(len, spaceAvailable);
+        for (unsigned int i = 0; i < len; i++) {
+            pio_sm_put(s_smUARTTX.pio, s_smUARTTX.sm, CircularBuffer_get(&s_cbWrite));
+        }
+    }
+}
+
+// Parallel -> Buffer
+static void pioRead(void) {
+    unsigned int len = pio_sm_get_rx_fifo_level(s_smWrite.pio, s_smWrite.sm);
+    if (len) {
+        const unsigned int spaceAvailable = CircularBuffer_unused(&s_cbWrite);
+        len = MIN(len, spaceAvailable);
+        for (unsigned int i = 0; i < len; i++) {
+            CircularBuffer_put(&s_cbWrite, pio_sm_get(s_smWrite.pio, s_smWrite.sm));
+        }
+    }
+}
+
+// Buffer -> Parallel
+static void pioWrite(void) {
+    unsigned int len = CircularBuffer_count(&s_cbRead);
+    if (len) {
+        const unsigned int spaceAvailable = 8 - pio_sm_get_tx_fifo_level(s_smRead.pio, s_smRead.sm);
+        len = MIN(len, spaceAvailable);
+        for (unsigned int i = 0; i < len; i++) {
+            pio_sm_put(s_smRead.pio, s_smRead.sm, CircularBuffer_get(&s_cbRead));
+        }
+    }
+}
+
+/*static inline void usbRead(void) {
     static uint8_t buffer[8];
     // USB READ, USB RX -> PIO TX
     if (tud_cdc_n_available(0)) {
@@ -245,4 +365,4 @@ static inline void usbWrite(void) {
             }
         }
     }
-}
+}*/

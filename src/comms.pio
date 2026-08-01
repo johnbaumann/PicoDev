@@ -1,6 +1,6 @@
 .define GPIO_CS     1
-.define GPIO_RD     12
-.define GPIO_WR     13
+.define GPIO_RD     26
+.define GPIO_WR     27
 
 
 ; Output data to pins from TX FIFO

@@ -1,6 +1,6 @@
 .define GPIO_RESET 0
 .define GPIO_CS 1
-.define GPIO_RD 12
+.define GPIO_RD 26
 
 
 .program booty

@@ -14,8 +14,8 @@ enum Pin {
     PIN_D5 = 8u,
     PIN_D6 = 9u,
     PIN_D7 = 10u,
-    PIN_RD = 12u,
-    PIN_WR = 13u,
+    PIN_UARTTX = 12u,
+    PIN_UARTRX = 13u,
     PIN_A0 = 14u,
     // The pins below are not physical connections
     // These are used for internal purposes only
@@ -27,6 +27,8 @@ enum Pin {
     STATUS_D5 = 22u,
     STATUS_D6 = 23u,
     STATUS_D7 = 24u,
+    PIN_RD = 26u,
+    PIN_WR = 27u,
 };
 
 typedef struct {

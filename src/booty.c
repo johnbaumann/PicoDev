@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
-#include <tusb.h>
+//#include <tusb.h>
 
 #include "booty.pio.h"
 #include "picodev.h"
@@ -120,7 +120,7 @@ void BOOTY_arm(void) {
     gpio_set_dir(PIN_RST, GPIO_IN);
 
     while (gpio_get(PIN_RST) == 0) {
-        tud_task();
+        //tud_task();
     }
 }
 
