@@ -26,14 +26,6 @@ int main(void) {
     // Initialize reset pin
     gpio_init(PIN_RST);
 
-    /*uart_set_irqs_enabled(uart0, false, false);
-    uart_init(uart0, 510000);
-    uart_set_hw_flow(uart0, false, false);
-    uart_set_format(uart0,8,1,UART_PARITY_NONE);
-    gpio_set_function(PIN_UARTTX, GPIO_FUNC_UART);
-    gpio_set_function(PIN_UARTRX, GPIO_FUNC_UART);*/
-    //uart_puts(uart0, "Hello world!\n");
-
     //tusb_init();  // TinyUSB Init
 
     while (true) {

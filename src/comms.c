@@ -60,9 +60,10 @@ static void usbWrite(void);
 static StateMachine s_smRead = {.pio = pio0, .sm = 0, .init = initProgramRead, .program = &readdata_program};
 static StateMachine s_smStatus = {.pio = pio0, .sm = 1, .init = initProgramStatus, .program = &statusreg_program};
 static StateMachine s_smWrite = {.pio = pio0, .sm = 2, .init = initProgramWrite, .program = &writedata_program};
+static StateMachine s_smUARTTX = {.pio = pio0, .sm = 3, .init = initProgramUARTTX, .program = &uart_tx_program};
 
 static StateMachine s_smUARTRX = {.pio = pio1, .sm = 0, .init = initProgramUARTRX, .program = &uart_rx_program};
-static StateMachine s_smUARTTX = {.pio = pio1, .sm = 1, .init = initProgramUARTTX, .program = &uart_tx_program};
+
 
 static StateMachine *const s_sm[] = {&s_smRead, &s_smStatus, &s_smWrite, &s_smUARTRX, &s_smUARTTX};
 static const size_t c_smCount = sizeof(s_sm) / sizeof(StateMachine *);
@@ -97,10 +98,13 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
         // usbRead();
         // usbWrite();
         pioRead();
-        pioWrite();
+        uartWrite();
 
         uartRead();
-        uartWrite();
+        pioWrite();
+
+        
+        
     }
 
     CircularBuffer_deinit(&s_cbRead);

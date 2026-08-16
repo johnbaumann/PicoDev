@@ -4,10 +4,10 @@
 #include <stdlib.h>
 
 typedef struct {
-    uint8_t *buffer;         // Pointer to the buffer
-    volatile unsigned head;  // Index of the head element
-    volatile unsigned tail;  // Index of the tail element
-    volatile unsigned size;  // Maximum size of the buffer
+    uint8_t *buffer;  // Pointer to the buffer
+    unsigned head;    // Index of the head element
+    unsigned tail;    // Index of the tail element
+    size_t size;      // Maximum size of the buffer
 } CircularBuffer;
 
 unsigned CircularBuffer_count(CircularBuffer *cb);
