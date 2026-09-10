@@ -45,13 +45,13 @@ add_executable(PicoDev
 )
 
 target_compile_definitions(PicoDev PRIVATE
-# Set CPU frequency to 271.2MHz at boot
-# python vcocalc.py 271.2 --cmake
+# Set CPU frequency to 276MHz at boot
+# python vcocalc.py 276 --cmake
         PLL_SYS_REFDIV=1
-        PLL_SYS_VCO_FREQ_HZ=1356000000
+        PLL_SYS_VCO_FREQ_HZ=1380000000
         PLL_SYS_POSTDIV1=5
         PLL_SYS_POSTDIV2=1
-        SYS_CLK_HZ=271200000
+        SYS_CLK_HZ=276000000
 #
         PICO_FLASH_SPI_CLKDIV=4 # Slow down flash, board is ~2x clock, so raise div from 2 to 4
         SYS_CLK_VREG_VOLTAGE_AUTO_ADJUST=1 # Auto adjust VREG
