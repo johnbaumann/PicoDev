@@ -41,7 +41,7 @@ add_executable(PicoDev
     src/main.c
     src/payload.s
     src/picodev.c
-    #src/usb-descriptors.c
+    src/usb-descriptors.c
 )
 
 # Set CPU frequency to 276MHz at boot
@@ -81,7 +81,7 @@ target_link_libraries(PicoDev
 target_include_directories(PicoDev PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
         ./src
-        #${PICO_TINYUSB_PATH}/src
+        ${PICO_TINYUSB_PATH}/src
 )
 
 # Add any user requested libraries
@@ -90,7 +90,7 @@ target_link_libraries(PicoDev
         hardware_pio
         pico_multicore
         pico_unique_id
-        #tinyusb_device
+        tinyusb_device
 )
 
 pico_add_extra_outputs(PicoDev)
