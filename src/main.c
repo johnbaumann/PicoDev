@@ -1,6 +1,6 @@
 #include <hardware/gpio.h>
 #include <pico/time.h>
-//#include <tusb.h>
+#include <tusb.h>
 
 #include "booty.h"
 #include "comms.h"
@@ -15,7 +15,7 @@ static void resetCallback(unsigned int gpio, uint32_t events);
 static void acknowledgeReset(void) {
     // Wait for the reset pin to go high
     while (gpio_get(PIN_RST) == 0) {
-        //tud_task();  // TinyUSB Device Task
+        tud_task();  // TinyUSB Device Task
     }
 
     g_resetPending = false;
@@ -26,7 +26,7 @@ int main(void) {
     // Initialize reset pin
     gpio_init(PIN_RST);
 
-    //tusb_init();  // TinyUSB Init
+    tusb_init();  // TinyUSB Init
 
     while (true) {
         // Run the booty program
@@ -43,7 +43,7 @@ int main(void) {
             gpio_set_irq_enabled_with_callback(PIN_RST, GPIO_IRQ_LEVEL_LOW, true, &resetCallback);
 
             while (!BOOTY_transferComplete && !g_resetPending) {
-                //tud_task();  // TinyUSB Device Task
+                tud_task();  // TinyUSB Device Task
             }
 
             sleep_ms(50);    // De-init is happening too fast, so we need to wait a bit. Fix this later

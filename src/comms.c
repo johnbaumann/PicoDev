@@ -16,8 +16,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-
-// #include <tusb.h>
+#include <tusb.h>
 
 #include "circularbuffer.h"
 #include "comms.pio.h"
@@ -61,10 +60,7 @@ static StateMachine s_smRead = {.pio = pio0, .sm = 0, .init = initProgramRead, .
 static StateMachine s_smStatus = {.pio = pio0, .sm = 1, .init = initProgramStatus, .program = &statusreg_program};
 static StateMachine s_smWrite = {.pio = pio0, .sm = 2, .init = initProgramWrite, .program = &writedata_program};
 static StateMachine s_smUARTTX = {.pio = pio0, .sm = 3, .init = initProgramUARTTX, .program = &uart_tx_program};
-
 static StateMachine s_smUARTRX = {.pio = pio1, .sm = 0, .init = initProgramUARTRX, .program = &uart_rx_program};
-
-
 static StateMachine *const s_sm[] = {&s_smRead, &s_smStatus, &s_smWrite, &s_smUARTRX, &s_smUARTTX};
 static const size_t c_smCount = sizeof(s_sm) / sizeof(StateMachine *);
 
@@ -93,7 +89,7 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
     CircularBuffer_init(&s_cbWrite, 4096);
 
     while (!g_resetPending) {
-        // tud_task();
+        tud_task();
 
         // usbRead();
         // usbWrite();
@@ -102,9 +98,6 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
 
         uartRead();
         pioWrite();
-
-        
-        
     }
 
     CircularBuffer_deinit(&s_cbRead);
@@ -335,7 +328,7 @@ static void pioWrite(void) {
     }
 }
 
-/*static inline void usbRead(void) {
+static inline void usbRead(void) {
     static uint8_t buffer[8];
     // USB READ, USB RX -> PIO TX
     if (tud_cdc_n_available(0)) {
@@ -369,4 +362,4 @@ static inline void usbWrite(void) {
             }
         }
     }
-}*/
+}
