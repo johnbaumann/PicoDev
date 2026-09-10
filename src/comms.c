@@ -19,6 +19,7 @@
 #include <tusb.h>
 
 #include "circularbuffer.h"
+#include "class/cdc/cdc_device.h"
 #include "comms.pio.h"
 #include "picodev.h"
 #include "uart.pio.h"
@@ -28,6 +29,8 @@
 #ifndef __STRING
 #define __STRING(x) #x
 #endif
+
+//#define PICODEV_UART_BRIDGE
 
 typedef struct {
     int channelA;
@@ -91,13 +94,21 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
     while (!g_resetPending) {
         tud_task();
 
-        // usbRead();
-        // usbWrite();
+#ifdef PICODEV_UART_BRIDGE
+        // UART<->PIO Bridge - Uses a circular buffer in each direction
         pioRead();
         uartWrite();
 
         uartRead();
         pioWrite();
+
+        // Discard any incoming usb data for now
+        tud_cdc_n_read_flush(0);
+#else
+        // USB<->PIO Bridge - Uses direct transfer between PIO FIFOs and tinyusb buffers
+        usbRead();
+        usbWrite();
+#endif
     }
 
     CircularBuffer_deinit(&s_cbRead);
