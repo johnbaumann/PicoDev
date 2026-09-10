@@ -44,16 +44,19 @@ add_executable(PicoDev
     src/usb-descriptors.c
 )
 
+target_compile_definitions(PicoDev PRIVATE
 # Set CPU frequency to 276MHz at boot
 # python vcocalc.py 276 --cmake
-target_compile_definitions(PicoDev PRIVATE
         PLL_SYS_REFDIV=1
         PLL_SYS_VCO_FREQ_HZ=1380000000
         PLL_SYS_POSTDIV1=5
         PLL_SYS_POSTDIV2=1
         SYS_CLK_HZ=276000000
-        SYS_CLK_VREG_VOLTAGE_AUTO_ADJUST=1
-        SYS_CLK_VREG_VOLTAGE_MIN=VREG_VOLTAGE_1_30
+#
+        PICO_FLASH_SPI_CLKDIV=4 # Slow down flash, board is ~2x clock, so raise div from 2 to 4
+        SYS_CLK_VREG_VOLTAGE_AUTO_ADJUST=1 # Auto adjust VREG
+        SYS_CLK_VREG_VOLTAGE_MIN=VREG_VOLTAGE_1_30 # Raise min. power from 1.15V to 1.3V
+        PICO_XOSC_STARTUP_DELAY_MULTIPLIER=64 # Raise startup delay for cheap crystal oscillators to stabilize
 )
 
 pico_set_program_name(PicoDev "PicoDev")
@@ -63,6 +66,7 @@ pico_set_program_version(PicoDev "0.1")
 pico_generate_pio_header(PicoDev
     ${CMAKE_CURRENT_LIST_DIR}/src/booty.pio
     ${CMAKE_CURRENT_LIST_DIR}/src/comms.pio
+    ${CMAKE_CURRENT_LIST_DIR}/src/uart.pio
 )
 
 # Modify the below lines to enable/disable output over UART/USB

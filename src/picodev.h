@@ -27,6 +27,8 @@ enum Pin {
     STATUS_D5 = 22u,
     STATUS_D6 = 23u,
     STATUS_D7 = 24u,
+    PIN_UARTTX = 28u,
+    PIN_UARTRX = 29u,
 };
 
 typedef struct {
