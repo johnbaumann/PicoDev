@@ -62,14 +62,13 @@ static StateMachine s_smReadUSB = {.pio = pio1, .sm = 0, .init = initProgramRead
 static StateMachine s_smReadUART = {.pio = pio1, .sm = 1, .init = initProgramReadUART, .program = &readdata_program};
 
 static StateMachine s_smWriteUSB = {.pio = pio1, .sm = 2, .init = initProgramWriteUSB, .program = &writedata_program};
-// static StateMachine s_smWriteUART = {.pio = pio1, .sm = 3, .init = initProgramWriteUART, .program =
-// &writedata_program};
+static StateMachine s_smWriteUART = {.pio = pio1, .sm = 3, .init = initProgramWriteUART, .program = &writedata_program};
 
 static StateMachine* const s_sm[] = {&s_smStatus, &s_smReadUSB, &s_smWriteUSB, &s_smUARTRX, &s_smUARTTX};
 static const size_t c_smCount = sizeof(s_sm) / sizeof(StateMachine*);
 
 static CircularBuffer s_cbReadUART;
-// static CircularBuffer s_cbWriteUART;
+static CircularBuffer s_cbWriteUART;
 
 static const unsigned int c_UARTBaud = 510000;
 
@@ -89,19 +88,22 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
     s_smReadUART.offset = s_smReadUSB.offset;
     initProgramReadUART(s_smReadUART.pio, s_smReadUART.sm, s_smReadUART.offset);
 
+    s_smWriteUART.offset = s_smWriteUSB.offset;
+    initProgramWriteUART(s_smWriteUART.pio, s_smWriteUART.sm, s_smWriteUART.offset);
+
     multicore_launch_core1(core1_entry);
 
     const StatusDMAChannels channels = initStatusDMA();
 
     CircularBuffer_init(&s_cbReadUART, 4096);
-    // CircularBuffer_init(&s_cbWriteUART, 4096);
+    CircularBuffer_init(&s_cbWriteUART, 4096);
 
     while (!g_resetPending) {
         tud_task();
 
         // UART<->PIO Bridge - Uses a circular buffer in each direction
-        // pioRead();
-        // uartWrite();
+        pioRead();
+        uartWrite();
 
         uartRead();
         pioWrite();
@@ -112,7 +114,7 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
     }
 
     CircularBuffer_deinit(&s_cbReadUART);
-    // CircularBuffer_deinit(&s_cbWriteUART);
+    CircularBuffer_deinit(&s_cbWriteUART);
 
     deinitStatusDMA(&channels);
 
@@ -258,10 +260,11 @@ static void initProgramWriteUSB(const PIO pio, const unsigned int sm, const unsi
     // sm_config_set_in_pin_count(&c, 8);  // Set the number of input pins to 8
     //(RP2040 cannot mask input pins, so in_count is ignored and set to 32 here)
     sm_config_set_jmp_pin(&c, PIN_WR);
-    sm_config_set_in_shift(&c, false, true, 8);
+    sm_config_set_in_shift(&c, true, false, 8);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
 
     pio_sm_init(pio, sm, offset, &c);
+    pio_sm_exec_wait_blocking(pio, sm, pio_encode_set(pio_x, 0));
     pio_sm_set_enabled(pio, sm, true);
 }
 
@@ -273,10 +276,11 @@ static void initProgramWriteUART(const PIO pio, const unsigned int sm, const uns
     // sm_config_set_in_pin_count(&c, 8);  // Set the number of input pins to 8
     //(RP2040 cannot mask input pins, so in_count is ignored and set to 32 here)
     sm_config_set_jmp_pin(&c, PIN_WR);
-    sm_config_set_in_shift(&c, false, true, 8);
+    sm_config_set_in_shift(&c, true, false, 8);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
 
     pio_sm_init(pio, sm, offset, &c);
+    pio_sm_exec_wait_blocking(pio, sm, pio_encode_set(pio_x, 1));
     pio_sm_set_enabled(pio, sm, true);
 }
 
@@ -333,12 +337,12 @@ static inline void updateStatusRegister(void) {
     const unsigned statusUSB = (deviceConfigured << 3u) | (spaceAvailableUSB << 1u) | (dataAvailableUSB << 0u);
 
     const uint32_t notFstatReadUART = ~s_smReadUART.pio->fstat;
-    const uint32_t notFstatWriteUART = ~s_smWriteUSB.pio->fstat;
+    const uint32_t notFstatWriteUART = ~s_smWriteUART.pio->fstat;
     const bool dataAvailableUART = (notFstatReadUART & (1u << (PIO_FSTAT_TXEMPTY_LSB + s_smReadUART.sm)));
-    const bool spaceAvailableUART = (notFstatWriteUART & (1u << (PIO_FSTAT_RXFULL_LSB + s_smWriteUSB.sm)));
+    const bool spaceAvailableUART = (notFstatWriteUART & (1u << (PIO_FSTAT_RXFULL_LSB + s_smWriteUART.sm)));
     const unsigned statusUART = (deviceConfigured << 3u) | (spaceAvailableUART << 1u) | (dataAvailableUART << 0u);
 
-    s_statusRegister = (statusUART << 4u) | statusUSB;
+    s_statusRegister = (statusUART << 4u) | (statusUSB << 0u);
 }
 
 // UART RX -> Buffer
@@ -354,7 +358,7 @@ static void uartRead(void) {
 }
 
 // Buffer -> USB TX
-/*static void uartWrite(void) {
+static void uartWrite(void) {
     unsigned int len = CircularBuffer_count(&s_cbWriteUART);
     if (len) {
         const unsigned int spaceAvailable = 8 - pio_sm_get_tx_fifo_level(s_smUARTTX.pio, s_smUARTTX.sm);
@@ -367,15 +371,15 @@ static void uartRead(void) {
 
 // Parallel -> Buffer
 static void pioRead(void) {
-    unsigned int len = pio_sm_get_rx_fifo_level(s_smWriteUSB.pio, s_smWriteUSB.sm);
+    unsigned int len = pio_sm_get_rx_fifo_level(s_smWriteUART.pio, s_smWriteUART.sm);
     if (len) {
         const unsigned int spaceAvailable = CircularBuffer_unused(&s_cbWriteUART);
         len = MIN(len, spaceAvailable);
         for (unsigned int i = 0; i < len; i++) {
-            CircularBuffer_put(&s_cbWriteUART, pio_sm_get(s_smWriteUSB.pio, s_smWriteUSB.sm));
+            CircularBuffer_put(&s_cbWriteUART, pio_sm_get(s_smWriteUART.pio, s_smWriteUART.sm));
         }
     }
-}*/
+}
 
 // Buffer -> Parallel
 static void pioWrite(void) {

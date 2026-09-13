@@ -49,12 +49,16 @@ outputWait:
 ; Monitor the WR signal, push data to the RX FIFO
 ; PSX -> USB
 .program writedata
-
 idle:
     wait 0 GPIO GPIO_CS             ; Wait for CS to assert low
     jmp pin idle                    ; jmp to start if wr not asserted
+    in pins, 12                     ; read up to the A1 pin
+    in null, 31                     ; discard other bits
+    mov y, isr                      ; move ISR to Y register
+    jmp x!=y idle                   ; Does A1 equal our pre-set address?
 
 ;writestall:
     wait 1 GPIO GPIO_WR             ; Wait for WR to finish
-    in pins, 8                      ; read 8 bits from data pins
+    in pins, 32                     ; read 8 bits from data pins
+    push
 .wrap
