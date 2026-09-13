@@ -14,7 +14,7 @@ idle:
     wait 0 GPIO GPIO_CS             ; wait for CS to assert low
     jmp pin idle                    ; jmp to idle if rd not asserted
     in pins, 1                      ; read A1
-    mov y, :: isr                   ; Copy ISR to y for comparison
+    mov y, :: isr                   ; Copy ISR to y, reverse bits
     jmp x!=y clearisr               ; Does A1 equal our pre-set address?
     in pins, 2                      ; Read up to A0
     in null, 31                     ; Shift out everything else
