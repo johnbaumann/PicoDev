@@ -21,10 +21,11 @@ static int s_dmaChannel = -1;
 
 static void deinitDMA(void);
 static void dmaHandler(void);
-static int initDMA(const volatile void *readAddr, const unsigned int transferCount);
+static int initDMA(const volatile void* readAddr, const unsigned int transferCount);
 static void initProgramBooty(const PIO pio, const unsigned int sm, const unsigned int offset);
 
-static StateMachine s_smBooty = {.pio = pio0, .sm = 0, .init = initProgramBooty, .program = &booty_program};
+static StateMachine s_smBooty = {
+    .pio = pio0, .sm = 0, .init = initProgramBooty, .program = &booty_program, .disabled = true};
 
 static void deinitDMA(void) {
     if (s_dmaChannel >= 0) {
@@ -45,7 +46,7 @@ static void dmaHandler(void) {
     BOOTY_transferComplete = true;
 }
 
-static int initDMA(const volatile void *read_addr, const unsigned int transfer_count) {
+static int initDMA(const volatile void* read_addr, const unsigned int transfer_count) {
     const int channel = dma_claim_unused_channel(true);
     dma_channel_config dmaConfig = dma_channel_get_default_config(channel);
 
@@ -100,7 +101,7 @@ static void initProgramBooty(const PIO pio, const unsigned int sm, const unsigne
 }
 
 void BOOTY_arm(void) {
-    const uint8_t *const c_payload = &c_payloadStart;
+    const uint8_t* const c_payload = &c_payloadStart;
     const int c_payloadSize = &c_payloadEnd - &c_payloadStart;
 
     BOOTY_transferComplete = false;
