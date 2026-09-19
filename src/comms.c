@@ -24,14 +24,6 @@
 #include "picodev.h"
 #include "uart.pio.h"
 
-// Pico-SDK doesn't seem to declare this properly?
-// Needed for time_critical attribute
-#ifndef __STRING
-#define __STRING(x) #x
-#endif
-
-//#define PICODEV_UART_BRIDGE
-
 typedef struct {
     int channelA;
     int channelB;
@@ -40,7 +32,7 @@ typedef struct {
 static volatile unsigned int s_statusRegister = 0x0a;
 
 static void core1_entry(void);
-static void deinitStatusDMA(const StatusDMAChannels *channels);
+static void deinitStatusDMA(const StatusDMAChannels* channels);
 static StatusDMAChannels initStatusDMA(void);
 static void initGPIO(void);
 
@@ -50,25 +42,34 @@ static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigne
 static void initProgramUARTRX(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void initProgramUARTTX(const PIO pio, const unsigned int sm, const unsigned int offset);
 
-static void pioRead(void);
-static void pioWrite(void);
-static void statusIRQHandler(void);
-static void updateStatusRegister(void);
-static void uartRead(void);
-static void uartWrite(void);
+static void pioReadToCB(CircularBuffer* buffer);
+static void pioWriteFromCB(CircularBuffer* buffer);
+static void uartReadToCB(CircularBuffer* buffer);
+static void uartWriteFromCB(CircularBuffer* buffer);
 static void usbRead(void);
 static void usbWrite(void);
 
-static StateMachine s_smRead = {.pio = pio0, .sm = 0, .init = initProgramRead, .program = &readdata_program};
-static StateMachine s_smStatus = {.pio = pio0, .sm = 1, .init = initProgramStatus, .program = &statusreg_program};
-static StateMachine s_smWrite = {.pio = pio0, .sm = 2, .init = initProgramWrite, .program = &writedata_program};
-static StateMachine s_smUARTTX = {.pio = pio0, .sm = 3, .init = initProgramUARTTX, .program = &uart_tx_program};
-static StateMachine s_smUARTRX = {.pio = pio1, .sm = 0, .init = initProgramUARTRX, .program = &uart_rx_program};
-static StateMachine *const s_sm[] = {&s_smRead, &s_smStatus, &s_smWrite, &s_smUARTRX, &s_smUARTTX};
-static const size_t c_smCount = sizeof(s_sm) / sizeof(StateMachine *);
+static void updateStatusRegister(void);
 
-static CircularBuffer s_cbRead;
-static CircularBuffer s_cbWrite;
+static StateMachine s_smStatus = {.pio = pio0, .sm = 0, .init = initProgramStatus, .program = &statusreg_program};
+static StateMachine s_smUARTTX = {.pio = pio0, .sm = 1, .init = initProgramUARTTX, .program = &uart_tx_program};
+static StateMachine s_smUARTRX = {.pio = pio0, .sm = 2, .init = initProgramUARTRX, .program = &uart_rx_program};
+static StateMachine s_smReadUSB = {
+    .pio = pio1, .sm = 0, .init = initProgramRead, .program = &readdata_program, .xReg = 0};
+static StateMachine s_smWriteUSB = {
+    .pio = pio1, .sm = 1, .init = initProgramWrite, .program = &writedata_program, .xReg = 0};
+static StateMachine s_smReadUART = {
+    .pio = pio1, .sm = 2, .init = initProgramRead, .program = &readdata_program, .linkedSM = &s_smReadUSB, .xReg = 1};
+static StateMachine s_smWriteUART = {.pio = pio1,
+                                     .sm = 3,
+                                     .init = initProgramWrite,
+                                     .program = &writedata_program,
+                                     .linkedSM = &s_smWriteUSB,
+                                     .xReg = 1};
+
+static StateMachine* const s_sm[] = {&s_smStatus, &s_smReadUSB,  &s_smWriteUSB, &s_smUARTRX,
+                                     &s_smUARTTX, &s_smReadUART, &s_smWriteUART};
+static const size_t c_smCount = sizeof(s_sm) / sizeof(StateMachine*);
 
 static const unsigned int c_UARTBaud = 510000;
 
@@ -84,35 +85,33 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
     for (int i = 0; i < c_smCount; i++) {
         initStateMachine(s_sm[i]);
     }
+
     multicore_launch_core1(core1_entry);
 
     const StatusDMAChannels channels = initStatusDMA();
 
-    CircularBuffer_init(&s_cbRead, 4096);
-    CircularBuffer_init(&s_cbWrite, 4096);
+    CircularBuffer cbReadUART;
+    CircularBuffer cbWriteUART;
+
+    CircularBuffer_init(&cbReadUART, 4096);
+    CircularBuffer_init(&cbWriteUART, 4096);
 
     while (!g_resetPending) {
         tud_task();
 
-#ifdef PICODEV_UART_BRIDGE
         // UART<->PIO Bridge - Uses a circular buffer in each direction
-        pioRead();
-        uartWrite();
+        pioReadToCB(&cbWriteUART);
+        uartWriteFromCB(&cbWriteUART);
+        uartReadToCB(&cbReadUART);
+        pioWriteFromCB(&cbReadUART);
 
-        uartRead();
-        pioWrite();
-
-        // Discard any incoming usb data for now
-        tud_cdc_n_read_flush(0);
-#else
         // USB<->PIO Bridge - Uses direct transfer between PIO FIFOs and tinyusb buffers
         usbRead();
         usbWrite();
-#endif
     }
 
-    CircularBuffer_deinit(&s_cbRead);
-    CircularBuffer_deinit(&s_cbWrite);
+    CircularBuffer_deinit(&cbReadUART);
+    CircularBuffer_deinit(&cbWriteUART);
 
     deinitStatusDMA(&channels);
 
@@ -122,7 +121,7 @@ void __time_critical_func(COMMS_cpuFIFO)(void) {
     multicore_reset_core1();
 }
 
-static void deinitStatusDMA(const StatusDMAChannels *channels) {
+static void deinitStatusDMA(const StatusDMAChannels* channels) {
     dma_channel_cleanup(channels->channelA);
     dma_channel_cleanup(channels->channelB);
     dma_channel_unclaim(channels->channelA);
@@ -162,10 +161,7 @@ static StatusDMAChannels initStatusDMA(void) {
 
 static void initGPIO(void) {
     static const unsigned int controlPins[] = {
-        PIN_CS,
-        PIN_RD,
-        PIN_WR,
-        PIN_A0,
+        PIN_CS, PIN_RD, PIN_WR, PIN_A1, PIN_A0,
     };
 
     // Control pins
@@ -192,7 +188,7 @@ static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned
     sm_config_set_out_pins(&c, PIN_D0, 8);
     sm_config_set_out_shift(&c, true, false, 8);
 
-    sm_config_set_in_pins(&c, PIN_A0);
+    sm_config_set_in_pins(&c, PIN_A1);
     sm_config_set_in_shift(&c, true, false, 0);
     sm_config_set_jmp_pin(&c, PIN_RD);
 
@@ -202,7 +198,20 @@ static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 
     pio_sm_init(pio, sm, offset, &c);
-    pio_sm_set_enabled(pio, sm, true);
+}
+
+static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigned int offset) {
+    pio_sm_config c = writedata_program_get_default_config(offset);
+
+    pio_sm_set_consecutive_pindirs(pio, sm, PIN_D0, 8, false);  // Set the pin direction to input
+    sm_config_set_in_pins(&c, PIN_D0);
+    // sm_config_set_in_pin_count(&c, 8);  // Set the number of input pins to 8
+    //(RP2040 cannot mask input pins, so in_count is ignored and set to 32 here)
+    sm_config_set_jmp_pin(&c, PIN_WR);
+    sm_config_set_in_shift(&c, true, false, 8);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+    pio_sm_init(pio, sm, offset, &c);
 }
 
 static void initProgramStatus(const PIO pio, const unsigned int sm, const unsigned int offset) {
@@ -220,22 +229,6 @@ static void initProgramStatus(const PIO pio, const unsigned int sm, const unsign
     sm_config_set_out_shift(&c, true, true, 8);
 
     pio_sm_init(pio, sm, offset, &c);
-    pio_sm_set_enabled(pio, sm, true);
-}
-
-static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigned int offset) {
-    pio_sm_config c = writedata_program_get_default_config(offset);
-
-    pio_sm_set_consecutive_pindirs(pio, sm, PIN_D0, 8, false);  // Set the pin direction to input
-    sm_config_set_in_pins(&c, PIN_D0);
-    // sm_config_set_in_pin_count(&c, 8);  // Set the number of input pins to 8
-    //(RP2040 cannot mask input pins, so in_count is ignored and set to 32 here)
-    sm_config_set_jmp_pin(&c, PIN_WR);
-    sm_config_set_in_shift(&c, false, true, 8);
-    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
-
-    pio_sm_init(pio, sm, offset, &c);
-    pio_sm_set_enabled(pio, sm, true);
 }
 
 static void initProgramUARTRX(const PIO pio, const unsigned int sm, const unsigned int offset) {
@@ -253,7 +246,6 @@ static void initProgramUARTRX(const PIO pio, const unsigned int sm, const unsign
     sm_config_set_clkdiv(&c, div);
 
     pio_sm_init(pio, sm, offset, &c);
-    pio_sm_set_enabled(pio, sm, true);
 }
 
 static void initProgramUARTTX(const PIO pio, const unsigned int sm, const unsigned int offset) {
@@ -272,7 +264,6 @@ static void initProgramUARTTX(const PIO pio, const unsigned int sm, const unsign
     sm_config_set_clkdiv(&c, div);
 
     pio_sm_init(pio, sm, offset, &c);
-    pio_sm_set_enabled(pio, sm, true);
 }
 
 static inline void updateStatusRegister(void) {
@@ -283,58 +274,66 @@ static inline void updateStatusRegister(void) {
     // Bit 3: Configured
 
     static const bool deviceConfigured = true;
-    const uint32_t notFstatRead = ~s_smRead.pio->fstat;
-    const uint32_t notFstatWrite = ~s_smWrite.pio->fstat;
-    const bool dataAvailable = (notFstatRead & (1u << (PIO_FSTAT_TXEMPTY_LSB + s_smRead.sm)));
-    const bool spaceAvailable = (notFstatWrite & (1u << (PIO_FSTAT_RXFULL_LSB + s_smWrite.sm)));
 
-    s_statusRegister = ((deviceConfigured << 3u) | (spaceAvailable << 1u) | (dataAvailable << 0u));
+    const uint32_t notFstatReadUSB = ~s_smReadUSB.pio->fstat;
+    const uint32_t notFstatWriteUSB = ~s_smWriteUSB.pio->fstat;
+    const bool dataAvailableUSB = notFstatReadUSB & (1u << (PIO_FSTAT_TXEMPTY_LSB + s_smReadUSB.sm));
+    const bool spaceAvailableUSB = notFstatWriteUSB & (1u << (PIO_FSTAT_RXFULL_LSB + s_smWriteUSB.sm));
+    const unsigned statusUSB = (deviceConfigured << 3u) | (spaceAvailableUSB << 1u) | (dataAvailableUSB << 0u);
+
+    const uint32_t notFstatReadUART = ~s_smReadUART.pio->fstat;
+    const uint32_t notFstatWriteUART = ~s_smWriteUART.pio->fstat;
+    const bool dataAvailableUART = (notFstatReadUART & (1u << (PIO_FSTAT_TXEMPTY_LSB + s_smReadUART.sm)));
+    const bool spaceAvailableUART = (notFstatWriteUART & (1u << (PIO_FSTAT_RXFULL_LSB + s_smWriteUART.sm)));
+    const unsigned statusUART = (deviceConfigured << 3u) | (spaceAvailableUART << 1u) | (dataAvailableUART << 0u);
+
+    s_statusRegister = (statusUART << 4u) | (statusUSB << 0u);
 }
 
 // UART RX -> Buffer
-static void uartRead(void) {
+static void uartReadToCB(CircularBuffer* buffer) {
     unsigned int len = pio_sm_get_rx_fifo_level(s_smUARTRX.pio, s_smUARTRX.sm);
     if (len) {
-        const unsigned int spaceAvailable = CircularBuffer_unused(&s_cbRead);
+        const unsigned int spaceAvailable = CircularBuffer_unused(buffer);
         len = MIN(len, spaceAvailable);
         for (unsigned int i = 0; i < len; i++) {
-            CircularBuffer_put(&s_cbRead, *((uint8_t *)s_smUARTRX.pio->rxf + 3));
+            CircularBuffer_put(buffer, *((uint8_t*)&s_smUARTRX.pio->rxf[s_smUARTRX.sm] + 3));
         }
     }
 }
 
 // Buffer -> USB TX
-static void uartWrite(void) {
-    unsigned int len = CircularBuffer_count(&s_cbWrite);
+static void uartWriteFromCB(CircularBuffer* buffer) {
+    unsigned int len = CircularBuffer_count(buffer);
     if (len) {
         const unsigned int spaceAvailable = 8 - pio_sm_get_tx_fifo_level(s_smUARTTX.pio, s_smUARTTX.sm);
         len = MIN(len, spaceAvailable);
         for (unsigned int i = 0; i < len; i++) {
-            pio_sm_put(s_smUARTTX.pio, s_smUARTTX.sm, CircularBuffer_get(&s_cbWrite));
+            pio_sm_put(s_smUARTTX.pio, s_smUARTTX.sm, CircularBuffer_get(buffer));
         }
     }
 }
 
 // Parallel -> Buffer
-static void pioRead(void) {
-    unsigned int len = pio_sm_get_rx_fifo_level(s_smWrite.pio, s_smWrite.sm);
+static void pioReadToCB(CircularBuffer* buffer) {
+    unsigned int len = pio_sm_get_rx_fifo_level(s_smWriteUART.pio, s_smWriteUART.sm);
     if (len) {
-        const unsigned int spaceAvailable = CircularBuffer_unused(&s_cbWrite);
+        const unsigned int spaceAvailable = CircularBuffer_unused(buffer);
         len = MIN(len, spaceAvailable);
         for (unsigned int i = 0; i < len; i++) {
-            CircularBuffer_put(&s_cbWrite, pio_sm_get(s_smWrite.pio, s_smWrite.sm));
+            CircularBuffer_put(buffer, pio_sm_get(s_smWriteUART.pio, s_smWriteUART.sm));
         }
     }
 }
 
 // Buffer -> Parallel
-static void pioWrite(void) {
-    unsigned int len = CircularBuffer_count(&s_cbRead);
+static void pioWriteFromCB(CircularBuffer* buffer) {
+    unsigned int len = CircularBuffer_count(buffer);
     if (len) {
-        const unsigned int spaceAvailable = 8 - pio_sm_get_tx_fifo_level(s_smRead.pio, s_smRead.sm);
+        const unsigned int spaceAvailable = 8 - pio_sm_get_tx_fifo_level(s_smReadUART.pio, s_smReadUART.sm);
         len = MIN(len, spaceAvailable);
         for (unsigned int i = 0; i < len; i++) {
-            pio_sm_put(s_smRead.pio, s_smRead.sm, CircularBuffer_get(&s_cbRead));
+            pio_sm_put(s_smReadUART.pio, s_smReadUART.sm, CircularBuffer_get(buffer));
         }
     }
 }
@@ -343,12 +342,12 @@ static inline void usbRead(void) {
     static uint8_t buffer[8];
     // USB READ, USB RX -> PIO TX
     if (tud_cdc_n_available(0)) {
-        if (!pio_sm_is_tx_fifo_full(s_smRead.pio, s_smRead.sm)) {
-            const unsigned int len = 8 - pio_sm_get_tx_fifo_level(s_smRead.pio, s_smRead.sm);
+        if (!pio_sm_is_tx_fifo_full(s_smReadUSB.pio, s_smReadUSB.sm)) {
+            const unsigned int len = 8 - pio_sm_get_tx_fifo_level(s_smReadUSB.pio, s_smReadUSB.sm);
             const unsigned int count = tud_cdc_n_read(0, buffer, len);
 
             for (unsigned int i = 0; i < count; i++) {
-                pio_sm_put(s_smRead.pio, s_smRead.sm, buffer[i]);
+                pio_sm_put(s_smReadUSB.pio, s_smReadUSB.sm, buffer[i]);
             }
         }
     }
@@ -357,13 +356,13 @@ static inline void usbRead(void) {
 static inline void usbWrite(void) {
     static uint8_t buffer[8];
     // USB WRITE, PIO RX -> USB TX
-    if (!pio_sm_is_rx_fifo_empty(s_smWrite.pio, s_smWrite.sm)) {
-        unsigned int len = pio_sm_get_rx_fifo_level(s_smWrite.pio, s_smWrite.sm);
+    if (!pio_sm_is_rx_fifo_empty(s_smWriteUSB.pio, s_smWriteUSB.sm)) {
+        unsigned int len = pio_sm_get_rx_fifo_level(s_smWriteUSB.pio, s_smWriteUSB.sm);
         len = MIN(len, tud_cdc_n_write_available(0));
 
         if (len) {
             for (unsigned int i = 0; i < len; i++) {
-                buffer[i] = pio_sm_get(s_smWrite.pio, s_smWrite.sm);
+                buffer[i] = pio_sm_get(s_smWriteUSB.pio, s_smWriteUSB.sm);
             }
 
             // Data gets discarded if the USB is not connected

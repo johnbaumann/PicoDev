@@ -16,7 +16,8 @@ enum Pin {
     PIN_D7 = 10u,
     PIN_RD = 12u,
     PIN_WR = 13u,
-    PIN_A0 = 14u,
+    PIN_A1 = 14u,
+    PIN_A0 = 15u,
     // The pins below are not physical connections
     // These are used for internal purposes only
     STATUS_D0 = 17u,
@@ -27,6 +28,7 @@ enum Pin {
     STATUS_D5 = 22u,
     STATUS_D6 = 23u,
     STATUS_D7 = 24u,
+    // The pins above are not physical connections
     PIN_UARTTX = 28u,
     PIN_UARTRX = 29u,
 };
@@ -37,6 +39,9 @@ typedef struct {
     const unsigned int sm;
     const PIO pio;
     const struct pio_program *const program;
+    const void* linkedSM;
+    const unsigned int xReg;
+    const bool disabled;
 } StateMachine;
 
 void deinitStateMachine(const StateMachine *stateMachine);
