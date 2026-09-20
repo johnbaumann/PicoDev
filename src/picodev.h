@@ -38,14 +38,14 @@ typedef struct {
     unsigned int offset;
     const unsigned int sm;
     const PIO pio;
-    const struct pio_program *const program;
+    const struct pio_program* const program;
     const void* linkedSM;
     const unsigned int xReg;
     const bool disabled;
 } StateMachine;
 
-void deinitStateMachine(const StateMachine *stateMachine);
-void initStateMachine(StateMachine *stateMachine);
+void deinitStateMachine(const StateMachine* stateMachine);
+void initStateMachine(StateMachine* stateMachine);
 
 // To-do: Move this to the main file later
 extern volatile bool g_resetPending;

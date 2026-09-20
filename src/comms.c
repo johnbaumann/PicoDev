@@ -29,27 +29,13 @@ typedef struct {
     int channelB;
 } StatusDMAChannels;
 
-static volatile unsigned int s_statusRegister = 0x0a;
-
-static void core1_entry(void);
-static void deinitStatusDMA(const StatusDMAChannels* channels);
-static StatusDMAChannels initStatusDMA(void);
-static void initGPIO(void);
+static const unsigned int c_UARTBaud = 510000;
 
 static void initProgramRead(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void initProgramStatus(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void initProgramWrite(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void initProgramUARTRX(const PIO pio, const unsigned int sm, const unsigned int offset);
 static void initProgramUARTTX(const PIO pio, const unsigned int sm, const unsigned int offset);
-
-static void pioReadToCB(CircularBuffer* buffer);
-static void pioWriteFromCB(CircularBuffer* buffer);
-static void uartReadToCB(CircularBuffer* buffer);
-static void uartWriteFromCB(CircularBuffer* buffer);
-static void usbRead(void);
-static void usbWrite(void);
-
-static void updateStatusRegister(void);
 
 static StateMachine s_smStatus = {.pio = pio0, .sm = 0, .init = initProgramStatus, .program = &statusreg_program};
 static StateMachine s_smUARTTX = {.pio = pio0, .sm = 1, .init = initProgramUARTTX, .program = &uart_tx_program};
@@ -71,7 +57,21 @@ static StateMachine* const s_sm[] = {&s_smStatus, &s_smReadUSB,  &s_smWriteUSB, 
                                      &s_smUARTTX, &s_smReadUART, &s_smWriteUART};
 static const size_t c_smCount = sizeof(s_sm) / sizeof(StateMachine*);
 
-static const unsigned int c_UARTBaud = 510000;
+static volatile unsigned int s_statusRegister = 0x0a;
+
+static void core1_entry(void);
+static void initGPIO(void);
+
+static void deinitStatusDMA(const StatusDMAChannels* channels);
+static StatusDMAChannels initStatusDMA(void);
+static void updateStatusRegister(void);
+
+static void pioReadToCB(CircularBuffer* buffer);
+static void pioWriteFromCB(CircularBuffer* buffer);
+static void uartReadToCB(CircularBuffer* buffer);
+static void uartWriteFromCB(CircularBuffer* buffer);
+static void usbRead(void);
+static void usbWrite(void);
 
 static void __time_critical_func(core1_entry)(void) {
     while (!g_resetPending) {
