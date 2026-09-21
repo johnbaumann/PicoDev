@@ -44,8 +44,7 @@ typedef struct {
     const bool disabled;
 } StateMachine;
 
+extern volatile bool g_resetPending;
+
 void deinitStateMachine(const StateMachine* stateMachine);
 void initStateMachine(StateMachine* stateMachine);
-
-// To-do: Move this to the main file later
-extern volatile bool g_resetPending;

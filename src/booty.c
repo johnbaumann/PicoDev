@@ -15,7 +15,7 @@
 
 extern const uint8_t c_payloadStart, c_payloadEnd;
 
-volatile bool BOOTY_transferComplete = false;
+volatile bool g_bootyTransferComplete = false;
 
 static int s_dmaChannel = -1;
 
@@ -43,7 +43,7 @@ static void dmaHandler(void) {
     dma_channel_set_irq0_enabled(s_dmaChannel, false);
     // Clear the interrupt flag
     dma_channel_acknowledge_irq0(s_dmaChannel);
-    BOOTY_transferComplete = true;
+    g_bootyTransferComplete = true;
 }
 
 static int initDMA(const volatile void* read_addr, const unsigned int transfer_count) {
@@ -104,7 +104,7 @@ void BOOTY_arm(void) {
     const uint8_t* const c_payload = &c_payloadStart;
     const int c_payloadSize = &c_payloadEnd - &c_payloadStart;
 
-    BOOTY_transferComplete = false;
+    g_bootyTransferComplete = false;
 
     gpio_set_dir(PIN_RST, GPIO_IN);
 
@@ -128,7 +128,7 @@ void BOOTY_arm(void) {
 void BOOTY_deinit(void) {
     deinitDMA();
     while (!pio_sm_is_tx_fifo_empty(s_smBooty.pio, s_smBooty.sm) && !gpio_get(PIN_CS)) {
-        tight_loop_contents();  // Wait for the TX FIFO to be empty
+        tud_task();
     }
     deinitStateMachine(&s_smBooty);
 }

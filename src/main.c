@@ -7,7 +7,6 @@
 #include "picodev.h"
 
 volatile bool g_resetPending = false;
-static uint32_t s_lastLowEvent = 0;
 
 static void acknowledgeReset(void);
 static void resetCallback(unsigned int gpio, uint32_t events);
@@ -19,7 +18,7 @@ static void acknowledgeReset(void) {
     }
 
     g_resetPending = false;
-    BOOTY_transferComplete = false;
+    g_bootyTransferComplete = false;
 }
 
 int main(void) {
@@ -33,7 +32,7 @@ int main(void) {
         // Wait for the transfer to complete or a reset occurs
         // Enter comms mode until a reset occurs
 
-        if (!BOOTY_transferComplete) {
+        if (!g_bootyTransferComplete) {
             // Disable the reset pin IRQ
             gpio_set_irq_enabled(PIN_RST, GPIO_IRQ_LEVEL_LOW | GPIO_IRQ_LEVEL_HIGH, false);
 
@@ -42,11 +41,10 @@ int main(void) {
             // Enable the reset pin IRQ
             gpio_set_irq_enabled_with_callback(PIN_RST, GPIO_IRQ_LEVEL_LOW, true, &resetCallback);
 
-            while (!BOOTY_transferComplete && !g_resetPending) {
+            while (!g_bootyTransferComplete && !g_resetPending) {
                 tud_task();  // TinyUSB Device Task
             }
 
-            sleep_ms(50);    // De-init is happening too fast, so we need to wait a bit. Fix this later
             BOOTY_deinit();  // Deinitialize the booty program
         } else {
             COMMS_cpuFIFO();
@@ -59,6 +57,8 @@ int main(void) {
 }
 
 static void resetCallback(unsigned int gpio, uint32_t events) {
+    static uint32_t s_lastLowEvent = 0;
+
     if (events & GPIO_IRQ_LEVEL_LOW) {
         s_lastLowEvent = time_us_32();
         // Disable low signal edge detection

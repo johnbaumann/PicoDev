@@ -1,5 +1,3 @@
-// To-do: Bug with status register, getting a random value on FIFO when first booting
-
 #include "comms.h"
 
 #include <hardware/clocks.h>
